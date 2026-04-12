@@ -14,7 +14,6 @@ const STATUS_COMPLETED     = 'Completed';
 
 const CACHE_KEY_DUE  = 'duePeople';
 const CACHE_KEY_PPL  = 'people';
-const CACHE_KEY_CAD  = 'peopleWithCadence';
 const CACHE_TTL      = 300; // 5 minutes
 
 
@@ -92,19 +91,16 @@ function doGet(e) {
       return json_(api_addPerson(body));
     }
 
-    if (action === 'setActive') {
-      const personId = e.parameter.personId || '';
-      const active   = e.parameter.active === 'true';
-      return json_(api_setActive(personId, active));
-    }
-
-    if (action === 'editPerson') {
-      const body = JSON.parse(e.parameter.payload || '{}');
-      return json_(api_editPerson(body));
+    if (action === 'getRoleFrequency') {
+      return json_(api_getRoleFrequency());
     }
 
     if (action === 'getAnalytics') {
       return json_(api_getAnalytics());
+    }
+
+    if (action === 'debugAnalytics') {
+      return json_(api_debugAnalytics());
     }
 
     return json_({ ok: true });
@@ -141,7 +137,7 @@ function cachePut_(key, data) {
 }
 
 function cacheBust_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEY_DUE, CACHE_KEY_PPL, CACHE_KEY_CAD]);
+  CacheService.getScriptCache().removeAll([CACHE_KEY_DUE, CACHE_KEY_PPL]);
 }
 
 
@@ -175,7 +171,9 @@ function setupSystem() {
   const settingsData       = [
     ['REMINDER_EMAIL','your@email.com'],
     ['MORNING_REMINDER_HOUR','8'],
+    ['DUESTATUS_REFRESH_HOUR','1'],
     ['MONDAY_FOLLOWUPS_HOUR','8'],
+    ['DUE_SOON_DAYS','2'],
     ['TIMEZONE',''],
   ];
 
@@ -243,10 +241,6 @@ function api_getOptions() {
 
 function api_getInteractions(personId) {
   if (!personId) return [];
-  const cacheKey = 'interactions_' + personId;
-  const cached = cacheGet_(cacheKey);
-  if (cached) return cached;
-
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_INTERACTIONS);
   if (!sheet) return [];
 
@@ -254,7 +248,7 @@ function api_getInteractions(personId) {
   const h    = data[0].map(v => v.toString().trim().toLowerCase().replace(/\s/g,''));
   const idx  = k => h.indexOf(k);
 
-  const result = data.slice(1)
+  return data.slice(1)
     .filter(row => String(row[idx('personid')]) === String(personId))
     .map(row => ({
       id:         row[idx('interactionid')],
@@ -266,9 +260,6 @@ function api_getInteractions(personId) {
       nextDt:     row[idx('nextactiondatetime')]  ? formatDate_(row[idx('nextactiondatetime')])  : ''
     }))
     .reverse(); // newest first
-
-  cachePut_(cacheKey, result);
-  return result;
 }
 
 
@@ -278,9 +269,6 @@ function api_getInteractions(personId) {
 const CADENCE_COL = 4; // Column E (0-based)
 
 function api_getPeopleWithCadence() {
-  const cached = cacheGet_(CACHE_KEY_CAD);
-  if (cached) return cached;
-
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
   if (!sheet) return [];
 
@@ -288,30 +276,26 @@ function api_getPeopleWithCadence() {
   const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
   const idx     = h => headers.indexOf(h);
 
-  const result = data.slice(1)
-    .filter(row => row[idx('fullname')])  // all people, active or not
+  return data.slice(1)
+    .filter(row => isActiveVal_(row[idx('active')]))
     .map(row => {
-      const raw = Number(row[CADENCE_COL]);
+      const raw = Number(row[CADENCE_COL]);          // column E raw value
       return {
         id:          row[idx('personid')],
         name:        row[idx('fullname')],
-        cadenceDays: raw > 0 ? raw : 30,
-        isDefault:   !(raw > 0),
+        cadenceDays: raw > 0 ? raw : 30,             // use column E, fall back to 30
+        isDefault:   !(raw > 0),                     // true = column E is blank/0
         fellowship:  row[idx('fellowship')] || '',
-        role:        row[idx('role')]       || '',
-        priority:    row[idx('priority')]   || '',
-        active:      isActiveVal_(row[idx('active')])
+        role:        row[idx('role')]       || ''
       };
     })
     .filter(p => p.name)
     .sort((a, b) => a.name.localeCompare(b.name));
-
-  cachePut_(CACHE_KEY_CAD, result);
-  return result;
 }
 
 
 // ─── API: SAVE CADENCE ───────────────────────────────────────
+// Writes directly to column E (CadenceDays) by position
 
 function api_saveCadence(personId, cadenceDays) {
   if (!personId)   return { success: false, error: 'Missing personId.' };
@@ -340,7 +324,9 @@ function api_saveCadence(personId, cadenceDays) {
 const SETTINGS_META = {
   REMINDER_EMAIL:         { label: 'Reminder Email', desc: 'Email address(es) to receive daily and weekly reminders. Separate multiple with commas.' },
   MORNING_REMINDER_HOUR:  { label: 'Morning Reminder Hour', desc: 'Hour (0–23) to send the daily due-now email.' },
+  DUESTATUS_REFRESH_HOUR: { label: 'Due Status Refresh Hour', desc: 'Hour (0–23) to automatically refresh due statuses.' },
   MONDAY_FOLLOWUPS_HOUR:  { label: 'Weekly Summary Hour', desc: 'Hour (0–23) to send the Monday weekly summary email.' },
+  DUE_SOON_DAYS:          { label: 'Due Soon (days)', desc: 'How many days ahead to consider someone "due soon".' },
   TIMEZONE:               { label: 'Timezone', desc: 'Timezone string, e.g. America/New_York. Leave blank to use spreadsheet default.' }
 };
 
@@ -349,12 +335,11 @@ function api_getSettings() {
   if (!sheet) return [];
   const data = sheet.getDataRange().getValues();
   return data.map(function(row) {
-    const key  = String(row[0]).trim();
-    const val  = String(row[1] === null || row[1] === undefined ? '' : row[1]).trim();
-    const meta = SETTINGS_META[key];
-    if (!meta || meta.hidden) return null;
-    return { key: key, val: val, label: meta.label, desc: meta.desc };
-  }).filter(Boolean);
+    const key = String(row[0]).trim();
+    const val = String(row[1] === null || row[1] === undefined ? '' : row[1]).trim();
+    const meta = SETTINGS_META[key] || { label: key, desc: '' };
+    return { key: key, val: val, label: meta.label, desc: meta.desc, hidden: !!meta.hidden };
+  }).filter(function(r) { return r.key && !r.hidden; });
 }
 
 function api_saveSetting(key, val) {
@@ -397,10 +382,7 @@ function api_addPerson(payload) {
     }
   }
 
-  const firstName = name.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-  const fellowshipInitials = String(payload.fellowship || '')
-    .trim().split(/\s+/).filter(Boolean).map(w => w[0].toUpperCase()).join('');
-  const pid = firstName + (fellowshipInitials ? '-' + fellowshipInitials : '') + '-' + Date.now().toString().slice(-4);
+  const pid      = 'P' + Date.now();
   const cadence  = parseInt(payload.cadenceDays) > 0 ? parseInt(payload.cadenceDays) : 30;
   const now      = new Date();
   const nextDue  = new Date(now.getTime() + cadence * 86400000);
@@ -415,7 +397,7 @@ function api_addPerson(payload) {
   if (idx('cadencedays')>= 0) row[idx('cadencedays')]= cadence;
   if (idx('active')     >= 0) row[idx('active')]     = true;
   if (idx('nextduedate')>= 0) row[idx('nextduedate')]= nextDue;
-  if (idx('duestatus')  >= 0) row[idx('duestatus')]  = STATUS_TO_BE_REACHED;
+  if (idx('duestatus')  >= 0) row[idx('duestatus')]  = 'Scheduled';
   if (idx('priority')   >= 0) row[idx('priority')]   = String(payload.priority    || '').trim();
 
   sheet.appendRow(row);
@@ -425,166 +407,6 @@ function api_addPerson(payload) {
     return { success: false, error: e.message };
   }
 }
-
-// ─── API: SET ACTIVE ─────────────────────────────────────────
-
-function api_setActive(personId, active) {
-  if (!personId) return { success: false, error: 'Missing personId.' };
-
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
-  if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
-
-  const data    = sheet.getDataRange().getValues();
-  const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
-  const pidCol  = headers.indexOf('personid');
-  const actCol  = headers.indexOf('active');
-  if (actCol < 0) return { success: false, error: 'Active column not found.' };
-
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][pidCol]) === String(personId)) {
-      sheet.getRange(i + 1, actCol + 1).setValue(active);
-      // Auto-close any open followups when marking inactive
-      if (!active) {
-        const followups = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_FOLLOWUPS);
-        if (followups) closeOpenFollowupsForPerson_(followups, personId, new Date(), 'Auto-closed: person marked inactive');
-      }
-      cacheBust_();
-      return { success: true };
-    }
-  }
-  return { success: false, error: 'Person not found.' };
-}
-
-
-// ─── API: EDIT PERSON ────────────────────────────────────────
-
-function api_editPerson(payload) {
-  try {
-    const personId = String(payload.personId || '').trim();
-    if (!personId) return { success: false, error: 'Missing personId.' };
-
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
-    if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
-
-    const data    = sheet.getDataRange().getValues();
-    const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
-    const idx     = h => headers.indexOf(h);
-    const pidCol  = idx('personid');
-
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][pidCol]) !== personId) continue;
-      const rowNum = i + 1;
-      if (payload.name       !== undefined && idx('fullname')   >= 0) sheet.getRange(rowNum, idx('fullname')   + 1).setValue(String(payload.name      || '').trim());
-      if (payload.role       !== undefined && idx('role')       >= 0) sheet.getRange(rowNum, idx('role')       + 1).setValue(String(payload.role       || '').trim());
-      if (payload.fellowship !== undefined && idx('fellowship') >= 0) sheet.getRange(rowNum, idx('fellowship') + 1).setValue(String(payload.fellowship  || '').trim());
-      if (payload.priority   !== undefined && idx('priority')   >= 0) sheet.getRange(rowNum, idx('priority')   + 1).setValue(String(payload.priority   || '').trim());
-      cacheBust_();
-      return { success: true };
-    }
-    return { success: false, error: 'Person not found.' };
-  } catch(e) {
-    return { success: false, error: e.message };
-  }
-}
-
-
-// ─── API: ANALYTICS ──────────────────────────────────────────
-
-function api_getAnalytics() {
-  try {
-    const ss           = SpreadsheetApp.getActiveSpreadsheet();
-    const interactions = ss.getSheetByName(SHEET_INTERACTIONS);
-    if (!interactions) return { weeksData: [], summary: {} };
-
-    const data = interactions.getDataRange().getValues();
-    const h    = data[0].map(v => v.toString().trim().toLowerCase().replace(/\s/g,''));
-    const idx  = k => h.indexOf(k);
-
-    const now       = new Date();
-    const NUM_WEEKS = 12;
-
-    // Build week buckets: Mon–Sun, going back NUM_WEEKS weeks
-    const weeks = [];
-    // Find most recent Monday
-    const dayOfWeek = now.getDay(); // 0=Sun
-    const daysToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const thisMon   = new Date(now);
-    thisMon.setHours(0,0,0,0);
-    thisMon.setDate(thisMon.getDate() - daysToMon);
-
-    for (let w = NUM_WEEKS - 1; w >= 0; w--) {
-      const start = new Date(thisMon);
-      start.setDate(start.getDate() - w * 7);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 7);
-      weeks.push({ start, end, total: 0, reached: 0, attempts: 0, label: '' });
-      // Label: "Dec 2", "Dec 9" etc
-      weeks[weeks.length - 1].label = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    }
-
-    // Tally interactions into week buckets
-    let totalAll = 0, reachedAll = 0;
-    const personSet = new Set();
-
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      const ts  = row[idx('timestamp')];
-      if (!ts) continue;
-      const d = new Date(ts);
-      if (isNaN(d)) continue;
-
-      const outcome = String(row[idx('outcometype')] || '').trim();
-      const pid     = String(row[idx('personid')]    || '').trim();
-
-      totalAll++;
-      if (outcome === 'Successful') reachedAll++;
-      if (pid) personSet.add(pid);
-
-      for (let w = 0; w < weeks.length; w++) {
-        if (d >= weeks[w].start && d < weeks[w].end) {
-          weeks[w].total++;
-          if (outcome === 'Successful') weeks[w].reached++;
-          else weeks[w].attempts++;
-          break;
-        }
-      }
-    }
-
-    // This week vs last week
-    const thisWeekTotal = weeks[weeks.length - 1].total;
-    const lastWeekTotal = weeks[weeks.length - 2] ? weeks[weeks.length - 2].total : 0;
-    const weekChange    = lastWeekTotal > 0 ? Math.round((thisWeekTotal - lastWeekTotal) / lastWeekTotal * 100) : null;
-
-    // Reach rate
-    const reachRate = totalAll > 0 ? Math.round(reachedAll / totalAll * 100) : 0;
-
-    // Best week
-    const bestWeek = weeks.reduce((best, w) => w.total > best.total ? w : best, weeks[0]);
-
-    return {
-      weeksData: weeks.map(w => ({
-        label:    w.label,
-        total:    w.total,
-        reached:  w.reached,
-        attempts: w.attempts
-      })),
-      summary: {
-        totalAll,
-        reachedAll,
-        reachRate,
-        thisWeekTotal,
-        lastWeekTotal,
-        weekChange,
-        bestWeekLabel: bestWeek.label,
-        bestWeekCount: bestWeek.total,
-        uniquePeople:  personSet.size
-      }
-    };
-  } catch(e) {
-    return { error: e.message };
-  }
-}
-
 
 function isDuplicateInteraction_(payload) {
   const cache  = CacheService.getScriptCache();
@@ -629,10 +451,6 @@ function saveInteractionCore_(payload) {
   if ((payload.nextAction === 'Callback' || payload.nextAction === 'Follow-up') &&
       !(nextActionDT instanceof Date && !isNaN(nextActionDT))) {
     throw new Error('Callback / follow-up date is required.');
-  }
-
-  if (nextActionDT instanceof Date && !isNaN(nextActionDT) && nextActionDT <= new Date()) {
-    throw new Error('Callback / follow-up date must be in the future.');
   }
 
   interactions.appendRow([
@@ -686,9 +504,10 @@ function saveInteractionCore_(payload) {
     ]);
   }
 
-  // Bust global cache + this person's interaction cache
+  // FIX: removed refreshDueStatuses() here — it was running on every single
+  // call log and writing to every person row. The daily trigger handles it.
+  // Instead we just bust the cache so the next read gets fresh data.
   cacheBust_();
-  CacheService.getScriptCache().remove('interactions_' + payload.personId);
 
   return { success: true, interactionId: iId };
 }
@@ -704,20 +523,19 @@ function resolveNextActionDateTime_(nextActionDT, cadenceDays, fromDate) {
   return d;
 }
 
-function closeOpenFollowupsForPerson_(sheet, personId, now, note) {
+function closeOpenFollowupsForPerson_(sheet, personId, now) {
   const data    = sheet.getDataRange().getValues();
   const h       = data[0].map(v => v.toString().trim().toLowerCase().replace(/\s/g,''));
   const pidIdx  = h.indexOf('personid');
   const statIdx = h.indexOf('status');
   const compIdx = h.indexOf('completedat');
   const noteIdx = h.indexOf('completionnote');
-  const closeNote = note || 'Auto-closed: successful contact';
 
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][pidIdx]) === String(personId) && data[i][statIdx] === 'Open') {
       sheet.getRange(i+1, statIdx+1).setValue('Done');
       sheet.getRange(i+1, compIdx+1).setValue(now);
-      sheet.getRange(i+1, noteIdx+1).setValue(closeNote);
+      sheet.getRange(i+1, noteIdx+1).setValue('Auto-closed: successful contact');
     }
   }
 }
@@ -1021,14 +839,305 @@ function sendEmailToMany_(emailsStr, subject, htmlBody) {
 function resetAllTriggers() {
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
 
-  const morningHour = parseInt(getSetting_('MORNING_REMINDER_HOUR')) || 8;
+  const refreshHour = parseInt(getSetting_('DUESTATUS_REFRESH_HOUR')) || 1;
+  const morningHour = parseInt(getSetting_('MORNING_REMINDER_HOUR'))  || 8;
   const mondayHour  = parseInt(getSetting_('MONDAY_FOLLOWUPS_HOUR'))  || 8;
 
-  ScriptApp.newTrigger('refreshDueStatuses').timeBased().everyDays(1).atHour(1).create();
+  ScriptApp.newTrigger('refreshDueStatuses').timeBased().everyDays(1).atHour(refreshHour).create();
   ScriptApp.newTrigger('sendMorningDueNowReminder').timeBased().everyDays(1).atHour(morningHour).create();
   ScriptApp.newTrigger('sendMondayFollowupsThisWeek').timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(mondayHour).create();
 
   SpreadsheetApp.getUi().alert('✅ Triggers set up successfully!');
+}
+
+
+
+
+// ─── API: DEBUG ANALYTICS ────────────────────────────────────
+// Hit ?action=debugAnalytics in browser to inspect raw sheet data
+
+function api_debugAnalytics() {
+  try {
+    const ss         = SpreadsheetApp.getActiveSpreadsheet();
+    const interSheet = ss.getSheetByName(SHEET_INTERACTIONS);
+    if (!interSheet) return { error: 'No INTERACTIONS sheet' };
+
+    const iData = interSheet.getDataRange().getValues();
+    const iH    = iData[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const iIdx  = k => iH.indexOf(k);
+
+    const sample = iData.slice(1, 6).map(row => ({
+      timestamp:   String(row[iIdx('timestamp')]),
+      tsType:      typeof row[iIdx('timestamp')],
+      tsIsDate:    row[iIdx('timestamp')] instanceof Date,
+      outcometype: row[iIdx('outcometype')],
+      result:      row[iIdx('result')],
+      personid:    row[iIdx('personid')]
+    }));
+
+    return {
+      headers:     iH,
+      totalRows:   iData.length - 1,
+      sample,
+      now:         new Date().toString()
+    };
+  } catch(e) {
+    return { error: e.message };
+  }
+}
+
+
+// ─── API: ANALYTICS ──────────────────────────────────────────
+
+function api_getAnalytics() {
+  try {
+    const ss         = SpreadsheetApp.getActiveSpreadsheet();
+    const interSheet = ss.getSheetByName(SHEET_INTERACTIONS);
+    const peopleSheet= ss.getSheetByName(SHEET_PEOPLE);
+    if (!interSheet) return { summary:{}, weeksData:[], silentPeople:[] };
+
+    const iData = interSheet.getDataRange().getValues();
+    const iH    = iData[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const iIdx  = k => iH.indexOf(k);
+
+    const now       = new Date();
+    const msDay     = 86400000;
+    const msWeek    = 7 * msDay;
+
+    // ── Build week buckets (last 12 weeks, Mon–Sun) ──────────
+    const weekStart = (d) => {
+      const dt = new Date(d);
+      const day = dt.getDay(); // 0=Sun
+      const diff = (day === 0 ? -6 : 1 - day);
+      const mon = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() + diff);
+      mon.setHours(0,0,0,0);
+      return mon;
+    };
+
+    const thisMonday = weekStart(now);
+    const weeks = [];
+    for (let w = 11; w >= 0; w--) {
+      const start = new Date(thisMonday.getTime() - w * msWeek);
+      const end   = new Date(start.getTime() + msWeek);
+      const label = start.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+      weeks.push({ start, end, label, total: 0, reached: 0 });
+    }
+
+    // ── This-week window ─────────────────────────────────────
+    const thisWeekStart = thisMonday;
+    const thisWeekEnd   = new Date(thisMonday.getTime() + msWeek);
+
+    // ── Last-contact tracking per person (for silent people) ─
+    const lastContactByPid = {}; // pid → { date, name }
+
+    let thisWeekTotal = 0;
+
+    for (let i = 1; i < iData.length; i++) {
+      const row       = iData[i];
+      const tsRaw     = row[iIdx('timestamp')];
+      const outcome   = String(row[iIdx('outcometype')] || '').trim();
+      const result    = String(row[iIdx('result')]       || '').trim();
+      const pid       = String(row[iIdx('personid')]    || '');
+      const name      = String(row[iIdx('fullname')]    || '');
+      if (!tsRaw || !pid) continue;
+
+      // getValues() returns Date objects for date cells in Apps Script
+      // Handle both Date objects and strings defensively
+      let ts;
+      if (tsRaw instanceof Date) {
+        ts = tsRaw;
+      } else {
+        ts = new Date(tsRaw);
+      }
+      if (isNaN(ts.getTime())) continue;
+
+      // Accept either OutcomeType='Successful' OR Result='Reached' to be defensive
+      const isReached = outcome === 'Successful' || result === 'Reached';
+
+      // Update last-contact map (for silent people)
+      if (isReached) {
+        if (!lastContactByPid[pid] || ts > lastContactByPid[pid].date) {
+          lastContactByPid[pid] = { date: ts, name };
+        }
+      }
+
+      // Bucket into weeks
+      for (let w = 0; w < weeks.length; w++) {
+        if (ts >= weeks[w].start && ts < weeks[w].end) {
+          weeks[w].total++;
+          if (isReached) weeks[w].reached++;
+          break;
+        }
+      }
+
+      // This-week total (all attempts)
+      if (ts >= thisWeekStart && ts < thisWeekEnd) thisWeekTotal++;
+    }
+
+    // ── Week-on-week change (reached: this week vs last week) ─
+    const thisWkReached = weeks[weeks.length - 1].reached;
+    const lastWkReached = weeks[weeks.length - 2] ? weeks[weeks.length - 2].reached : 0;
+    let weekChange = null;
+    if (lastWkReached > 0) {
+      weekChange = Math.round((thisWkReached - lastWkReached) / lastWkReached * 100);
+    } else if (thisWkReached > 0) {
+      weekChange = 100;
+    }
+
+    // ── Unique people reached (all time in window) ────────────
+    const uniquePeople = Object.keys(lastContactByPid).length;
+
+    // ── Silent people (no successful contact in 6+ weeks) ─────
+    const sixWeeksAgo = new Date(now.getTime() - 42 * msDay);
+    const pData  = peopleSheet ? peopleSheet.getDataRange().getValues() : [[]];
+    const pH     = pData[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const pIdx   = k => pH.indexOf(k);
+
+    // ── Reach rate: of all people called this week, how many were reached? ──
+    // Using interaction rows directly avoids the stale-NextDueDate problem:
+    // once a successful call is logged, NextDueDate moves forward, so counting
+    // by due date always under-counts the denominator.
+    const calledThisWeekPids  = new Set();
+    const reachedThisWeekPids = new Set();
+
+    for (let i = 1; i < iData.length; i++) {
+      const row     = iData[i];
+      const tsRaw2  = row[iIdx('timestamp')];
+      const outcome2= String(row[iIdx('outcometype')] || '').trim();
+      const result2 = String(row[iIdx('result')]       || '').trim();
+      const pid2    = String(row[iIdx('personid')]    || '');
+      if (!tsRaw2 || !pid2) continue;
+      const ts2 = tsRaw2 instanceof Date ? tsRaw2 : new Date(tsRaw2);
+      if (isNaN(ts2.getTime())) continue;
+      if (ts2 >= thisWeekStart && ts2 < thisWeekEnd) {
+        calledThisWeekPids.add(pid2);
+        if (outcome2 === 'Successful' || result2 === 'Reached') {
+          reachedThisWeekPids.add(pid2);
+        }
+      }
+    }
+
+    const thisWeekDue        = calledThisWeekPids.size;
+    const thisWeekDueReached = reachedThisWeekPids.size;
+    const completedThisWeek  = thisWeekDueReached;
+
+    const silentPeople = [];
+    for (let i = 1; i < pData.length; i++) {
+      if (!isActiveVal_(pData[i][pIdx('active')])) continue;
+      const pid  = String(pData[i][pIdx('personid')]);
+      const name = String(pData[i][pIdx('fullname')] || '').trim();
+      if (!name) continue;
+
+      const last = lastContactByPid[pid];
+      if (!last || last.date < sixWeeksAgo) {
+        const weeksSince = last
+          ? Math.floor((now - last.date) / msWeek)
+          : null;
+        silentPeople.push({
+          pid,
+          name,
+          lastContact: last ? last.date.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : null,
+          weeksSince
+        });
+      }
+    }
+    silentPeople.sort((a, b) => {
+      if (!a.lastContact) return -1;
+      if (!b.lastContact) return 1;
+      return (a.weeksSince || 0) > (b.weeksSince || 0) ? -1 : 1;
+    });
+
+    return {
+      summary: {
+        thisWeekTotal,
+        thisWeekDue,
+        thisWeekDueReached,
+        completedThisWeek,
+        weekChange,
+        uniquePeople
+      },
+      weeksData: weeks.map(w => ({
+        label:   w.label,
+        total:   w.total,
+        reached: w.reached
+      })),
+      silentPeople
+    };
+
+  } catch(e) {
+    return { error: e.message, summary:{}, weeksData:[], silentPeople:[] };
+  }
+}
+
+
+// ─── API: ROLE FREQUENCY ─────────────────────────────────────
+// Returns average days between successful contacts, grouped by Role (column C).
+// Only counts people with at least 2 successful contacts so the average is meaningful.
+
+function api_getRoleFrequency() {
+  try {
+    const ss           = SpreadsheetApp.getActiveSpreadsheet();
+    const peopleSheet  = ss.getSheetByName(SHEET_PEOPLE);
+    const interSheet   = ss.getSheetByName(SHEET_INTERACTIONS);
+    if (!peopleSheet || !interSheet) return { roles: [] };
+
+    // Build personId → role map
+    const pData    = peopleSheet.getDataRange().getValues();
+    const pH       = pData[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const pIdx     = h => pH.indexOf(h);
+    const personRole = {};
+    for (let i = 1; i < pData.length; i++) {
+      if (!isActiveVal_(pData[i][pIdx('active')])) continue;
+      const pid  = String(pData[i][pIdx('personid')]);
+      const role = String(pData[i][pIdx('role')] || '').trim() || 'No Role';
+      personRole[pid] = role;
+    }
+
+    // Collect successful contact timestamps per person
+    const iData  = interSheet.getDataRange().getValues();
+    const iH     = iData[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const iIdx   = h => iH.indexOf(h);
+    const contactsByPerson = {}; // pid → sorted array of Date
+
+    for (let i = 1; i < iData.length; i++) {
+      const outcome = String(iData[i][iIdx('outcometype')] || '').trim();
+      const result  = String(iData[i][iIdx('result')]      || '').trim();
+      if (outcome !== 'Successful' && result !== 'Reached') continue;
+      const pid  = String(iData[i][iIdx('personid')]);
+      const tsRaw= iData[i][iIdx('timestamp')];
+      if (!tsRaw) continue;
+      const d = tsRaw instanceof Date ? tsRaw : new Date(tsRaw);
+      if (isNaN(d.getTime())) continue;
+      if (!contactsByPerson[pid]) contactsByPerson[pid] = [];
+      contactsByPerson[pid].push(d);
+    }
+
+    // Sort timestamps and compute avg gap per person, then group by role
+    const roleGaps = {}; // role → array of avg-gap-days per person
+
+    for (const [pid, dates] of Object.entries(contactsByPerson)) {
+      if (dates.length < 2) continue; // need at least 2 to compute a gap
+      dates.sort((a, b) => a - b);
+      let totalGap = 0;
+      for (let i = 1; i < dates.length; i++) {
+        totalGap += (dates[i] - dates[i-1]) / 86400000;
+      }
+      const avgGap = totalGap / (dates.length - 1);
+      const role   = personRole[pid] || 'No Role';
+      if (!roleGaps[role]) roleGaps[role] = [];
+      roleGaps[role].push({ pid, avgGap, contactCount: dates.length });
+    }
+
+    // Summarise per role
+    const roles = Object.entries(roleGaps).map(([role, people]) => {
+      const avgDays = Math.round(people.reduce((s, p) => s + p.avgGap, 0) / people.length);
+      return { role, avgDays, peopleCount: people.length };
+    }).sort((a, b) => a.avgDays - b.avgDays); // fastest cadence first
+
+    return { roles };
+  } catch(e) {
+    return { roles: [], error: e.message };
+  }
 }
 
 
