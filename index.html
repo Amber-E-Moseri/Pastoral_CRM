@@ -276,6 +276,48 @@
     .aset-status { font-size:14px; font-weight:700; width:16px; text-align:center; }
     .aset-status.ok { color:var(--success); }
     .aset-status.err { color:var(--danger); }
+    /* ── Analytics page ── */
+    .an-stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 24px; }
+    .an-stat-box { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 14px 12px; }
+    .an-stat-num { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; margin-bottom: 3px; color: var(--accent); }
+    .an-stat-num.gold { color: var(--gold); }
+    .an-stat-num.blue { color: var(--blue); }
+    .an-stat-num.green { color: var(--success); }
+    .an-stat-lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+    .an-stat-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .an-chart-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 14px 10px; margin-bottom: 20px; overflow: hidden; }
+    .an-chart-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 14px; }
+    .an-chart-wrap { width: 100%; overflow-x: auto; scrollbar-width: none; }
+    .an-chart-wrap::-webkit-scrollbar { display: none; }
+    .an-chart-svg { display: block; }
+    .an-trend { font-size: 12px; font-weight: 600; margin-top: 2px; }
+    .an-trend.up   { color: var(--success); }
+    .an-trend.down { color: var(--danger); }
+    .an-trend.flat { color: var(--muted); }
+    .an-section-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 12px; margin-top: 4px; }
+    .an-lastweek-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; margin-bottom: 20px; }
+    .an-day-box { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 4px; text-align: center; }
+    .an-day-name { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 5px; }
+    .an-day-num  { font-size: 20px; font-weight: 700; color: var(--text); line-height: 1; }
+    .an-day-box.has-calls { border-color: var(--accent); background: var(--accent-soft); }
+    .an-day-box.has-calls .an-day-num { color: var(--accent); }
+    .an-day-reach { font-size: 9px; color: var(--muted); margin-top: 2px; }
+    .an-day-box.has-calls .an-day-reach { color: var(--accent); }
+    .an-silent-row { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--danger); border-radius: var(--radius-sm); padding: 11px 13px; margin-bottom: 7px; }
+    .an-silent-av  { width: 34px; height: 34px; border-radius: 7px; background: var(--danger-bg); color: var(--danger); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+    .an-silent-name { font-size: 14px; font-weight: 600; }
+    .an-silent-sub  { font-size: 12px; color: var(--muted); margin-top: 1px; }
+    .an-lastweek-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 14px; margin-bottom: 20px; }
+    /* ── Range toggle ── */
+    .an-range-toggle { display: flex; gap: 6px; margin-bottom: 16px; }
+    .an-range-btn { flex: 1; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-family: inherit; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; }
+    .an-range-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    /* ── Line chart ── */
+    .an-line-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 14px 12px; margin-bottom: 20px; overflow: hidden; }
+    .an-line-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .an-line-sub { font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+    .an-line-wrap { width: 100%; overflow-x: auto; scrollbar-width: none; }
+    .an-line-wrap::-webkit-scrollbar { display: none; }
   </style>
 </head>
 <body>
@@ -284,6 +326,13 @@
 <div class="page active" id="pg-home">
   <div class="topbar">
     <span class="topbar-title">Call Tracker</span>
+    <button class="tb-btn icon-btn" onclick="showPage('pg-addperson')" title="Add Person" aria-label="Add Person">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+        <circle cx="8" cy="7" r="3.2" stroke="#fff" stroke-width="1.5"/>
+        <path d="M2 17c0-3 2.5-4.8 6-4.8" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M15 11.5v5M12.5 14h5" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </button>
     <button class="tb-btn icon-btn" onclick="showPage('pg-settings')" title="Settings" aria-label="Settings">
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
         <circle cx="10" cy="10" r="2.5" stroke="#fff" stroke-width="1.5"/>
@@ -296,9 +345,9 @@
     <h1 class="home-title" id="home-greeting">Good morning, Pastor.</h1>
     <p class="home-sub">Your daily outreach dashboard.</p>
     <div class="stat-row">
-      <div class="stat-box cb"><div class="stat-num" id="h-cb">—</div><div class="stat-lbl">Callbacks</div></div>
-      <div class="stat-box ov"><div class="stat-num" id="h-ov">—</div><div class="stat-lbl">Overdue</div></div>
-      <div class="stat-box td"><div class="stat-num" id="h-td">—</div><div class="stat-lbl">Due Today</div></div>
+      <div class="stat-box cb" onclick="goToDashSection('s-cb')" style="cursor:pointer"><div class="stat-num" id="h-cb">—</div><div class="stat-lbl">Callbacks</div></div>
+      <div class="stat-box ov" onclick="goToDashSection('s-ov')" style="cursor:pointer"><div class="stat-num" id="h-ov">—</div><div class="stat-lbl">Overdue</div></div>
+      <div class="stat-box td" onclick="goToDashSection('s-td')" style="cursor:pointer"><div class="stat-num" id="h-td">—</div><div class="stat-lbl">Due Today</div></div>
     </div>
     <p class="sec-label">Actions</p>
     <div class="nav-card" onclick="showPage('pg-dash')">
@@ -334,15 +383,17 @@
       <div class="nav-text"><div class="nav-title">Past Notes</div><div class="nav-sub">View call history for any person</div></div>
       <span class="nav-arrow">›</span>
     </div>
-    <div class="nav-card" onclick="showPage('pg-addperson')">
+
+    <div class="nav-card" onclick="showPage('pg-analytics')">
       <div class="nav-icon soft">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <circle cx="8" cy="7" r="3.5" stroke="#6f6f6a" stroke-width="1.4"/>
-          <path d="M2 17c0-3.314 2.686-5 6-5" stroke="#6f6f6a" stroke-width="1.4" stroke-linecap="round"/>
-          <path d="M15 12v5M12.5 14.5h5" stroke="#244c43" stroke-width="1.6" stroke-linecap="round"/>
+          <rect x="2" y="11" width="3" height="7" rx="1" fill="#6f6f6a"/>
+          <rect x="7" y="7" width="3" height="11" rx="1" fill="#6f6f6a"/>
+          <rect x="12" y="4" width="3" height="14" rx="1" fill="#244c43"/>
+          <rect x="17" y="9" width="3" height="9" rx="1" fill="#6f6f6a"/>
         </svg>
       </div>
-      <div class="nav-text"><div class="nav-title">Add Person</div><div class="nav-sub">Add a new contact to your call list</div></div>
+      <div class="nav-text"><div class="nav-title">Analytics</div><div class="nav-sub">Calls per week, reach rate and trends</div></div>
       <span class="nav-arrow">›</span>
     </div>
   </div>
@@ -354,7 +405,6 @@
     <span class="topbar-title">Who to Call</span>
     <button class="tb-btn" onclick="showPage('pg-home')">Home</button>
     <button class="tb-btn" onclick="loadDash()">Refresh</button>
-    <button class="tb-btn" onclick="showPage('pg-addperson')">+ Add</button>
     <button class="tb-btn hi" onclick="showPage('pg-log')">Log Call</button>
   </div>
   <div class="sum-strip" id="sum-strip" style="display:none">
@@ -564,7 +614,7 @@
     <div id="addperson-form">
       <p class="form-kicker">Contacts</p>
       <h1 class="form-title">Add Person</h1>
-      <p class="form-sub">Add a new contact to your pastoral call list.</p>
+      <p class="form-sub">Add a new contact to your call list.</p>
       <div id="addperson-msg" class="msg"></div>
       <div class="field">
         <label class="field-label">Full Name <span style="color:var(--danger)">*</span></label>
@@ -572,11 +622,11 @@
       </div>
       <div class="field">
         <label class="field-label">Role <span style="font-weight:400;color:var(--muted)">&#8212; optional</span></label>
-        <input type="text" class="aset-input" id="ap-role" placeholder="e.g. Elder, Deacon, Member" style="width:100%;padding:11px 14px;font-size:15px;">
+        <input type="text" class="aset-input" id="ap-role" placeholder="e.g. Coordinator, Cell leader, Manager" style="width:100%;padding:11px 14px;font-size:15px;">
       </div>
       <div class="field">
         <label class="field-label">Fellowship <span style="font-weight:400;color:var(--muted)">&#8212; optional</span></label>
-        <input type="text" class="aset-input" id="ap-fellowship" placeholder="e.g. Youth, Seniors" style="width:100%;padding:11px 14px;font-size:15px;">
+        <input type="text" class="aset-input" id="ap-fellowship" placeholder="e.g. University of Manitoba, University of Lethbridge" style="width:100%;padding:11px 14px;font-size:15px;">
       </div>
       <div class="field">
         <label class="field-label">Priority <span style="font-weight:400;color:var(--muted)">&#8212; optional</span></label>
@@ -584,8 +634,8 @@
       </div>
       <div class="field">
         <label class="field-label">Call Cadence (days)</label>
-        <input type="number" class="aset-input" id="ap-cadence" value="30" min="1" max="365" style="width:100%;padding:11px 14px;font-size:15px;">
-        <p class="field-hint">How many days between calls. Default is 30.</p>
+        <input type="number" class="aset-input" id="ap-cadence" value="28" min="1" max="365" style="width:100%;padding:11px 14px;font-size:15px;">
+        <p class="field-hint">How many days between calls. Default is 28.</p>
       </div>
     </div>
   </div>
@@ -594,8 +644,25 @@
   </div>
 </div>
 
+<!-- ANALYTICS PAGE -->
+<div class="page" id="pg-analytics">
+  <div class="topbar">
+    <button class="tb-btn" onclick="showPage('pg-home')">&#8249; Home</button>
+    <span class="topbar-title">Analytics</span>
+    <button class="tb-btn" onclick="loadAnalytics()">Refresh</button>
+  </div>
+  <div class="shell">
+    <p class="form-kicker">Insights</p>
+    <h1 class="form-title">Analytics</h1>
+    <p class="form-sub">Outreach trends and activity overview.</p>
+    <div id="analytics-body">
+      <div class="people-loading" style="padding:40px 0"><span>Loading</span><span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span></div>
+    </div>
+  </div>
+</div>
+
 <script>
-  var API = 'YOUR WEB APP URL';
+  var API = 'https://script.google.com/macros/s/AKfycbxIyopzk2Lg2joe_7AWLJhofkEKy4k8sDQBOJ9OtxYhQW7sh98nCuLWLMblpmh7ogC6/exec';
 
   function showPage(id) {
     document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
@@ -609,6 +676,7 @@
     if (id === 'pg-appsettings')  loadAppSettings();
     if (id === 'pg-cadence')      initCadencePage();
     if (id === 'pg-addperson')    initAddPersonPage();
+    if (id === 'pg-analytics')    loadAnalytics();
   }
 
   function apiFetch(action, params) {
@@ -689,6 +757,12 @@
     document.getElementById('sn-td').textContent = (data.today || []).length;
     document.getElementById('sn-wk').textContent = ((data.thisWeek || []).length + (data.nextWeek || []).length);
     document.getElementById('sn-nd').textContent = (data.noDate || []).length;
+    // Jump to section if triggered from home stat boxes
+    if (dashJumpTarget) {
+      var target = dashJumpTarget;
+      dashJumpTarget = null;
+      setTimeout(function(){ jumpTo(target); }, 80);
+    }
   }
 
   function showDashLoading() {
@@ -707,6 +781,13 @@
   }
 
   function jumpTo(id){ var el = document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth', block:'start'}); }
+
+  var dashJumpTarget = null;
+
+  function goToDashSection(sectionId) {
+    dashJumpTarget = sectionId;
+    showPage('pg-dash');
+  }
 
   var allPeople = [], filtered = [], hiIdx = -1, selResult = '', selAction = 'None';
   var saving = false, lastSig = '', lastAt = 0;
@@ -1326,7 +1407,7 @@
     document.getElementById('ap-role').value = '';
     document.getElementById('ap-fellowship').value = '';
     document.getElementById('ap-priority').value = '';
-    document.getElementById('ap-cadence').value = '30';
+    document.getElementById('ap-cadence').value = '28';
     showAddPersonMsg('', '');
   }
 
@@ -1342,7 +1423,7 @@
     var role      = document.getElementById('ap-role').value.trim();
     var fellowship= document.getElementById('ap-fellowship').value.trim();
     var priority  = document.getElementById('ap-priority').value.trim();
-    var cadence   = parseInt(document.getElementById('ap-cadence').value) || 30;
+    var cadence   = parseInt(document.getElementById('ap-cadence').value) || 28;
 
     if (!name) { showAddPersonMsg('Full name is required.', 'error'); document.getElementById('ap-name').focus(); return; }
 
@@ -1379,6 +1460,234 @@
   }
 
   window.onload = loadHome;
+
+  // ── Analytics ─────────────────────────────────────────────
+  var analyticsData = null;
+  var analyticsRange = '3m'; // '1m' or '3m'
+  var roleFreqData = null;
+
+  function loadAnalytics() {
+    var el = document.getElementById('analytics-body');
+    el.innerHTML = '<div class="people-loading" style="padding:40px 0"><span>Loading</span><span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span></div>';
+    // Fetch main analytics first — role frequency is secondary and must never block it
+    apiFetch('getAnalytics').then(function(data) {
+      if (data.error) { el.innerHTML = '<div class="err-box">' + esc(data.error) + '</div>'; return; }
+      analyticsData = data;
+      renderAnalytics(data);
+      // Now fetch role frequency independently — failures are silent
+      apiFetch('getRoleFrequency').then(function(r) {
+        if (r && Array.isArray(r.roles) && r.roles.length) {
+          roleFreqData = r;
+          // Re-render to append the role section without losing the existing view
+          renderAnalytics(analyticsData);
+        }
+      }).catch(function(){});
+    }).catch(function(e) {
+      el.innerHTML = '<div class="err-box">Could not load analytics.<br><small>' + esc(String(e)) + '</small></div>';
+    });
+  }
+
+  function setAnalyticsRange(range) {
+    analyticsRange = range;
+    if (analyticsData) renderAnalytics(analyticsData);
+  }
+
+  function renderAnalytics(data) {
+    var s      = data.summary       || {};
+    var wks    = data.weeksData     || [];
+    var days   = data.lastWeekDays  || [];
+    var silent = data.silentPeople  || [];
+    var el     = document.getElementById('analytics-body');
+
+    // ── Range filter ──
+    var numWeeks = analyticsRange === '1m' ? 4 : 12;
+    var filtered = wks.slice(-numWeeks);
+
+    // Recalculate summary stats for filtered range
+    var filtTotal    = filtered.reduce(function(s,w){ return s + w.total; }, 0);
+    var filtReached  = filtered.reduce(function(s,w){ return s + w.reached; }, 0);
+    var filtRate     = filtTotal > 0 ? Math.round(filtReached / filtTotal * 100) : 0;
+
+    // ── This week stats ──
+    var thisWkTotal     = s.thisWeekTotal      || 0;
+    var thisWkDue       = s.thisWeekDue        || 0;
+    var thisWkReached   = s.thisWeekDueReached || 0;
+    var thisWkCompleted = s.completedThisWeek  || 0;
+
+    // ── Summary stat boxes ──
+    var statsHtml =
+      '<div class="an-stat-row">' +
+        '<div class="an-stat-box">' +
+          '<div class="an-stat-num">' + thisWkTotal + '</div>' +
+          '<div class="an-stat-lbl">This Week</div>' +
+          '<div class="an-stat-sub">Total calls made</div>' +
+        '</div>' +
+        '<div class="an-stat-box">' +
+          '<div class="an-stat-num green">' + thisWkCompleted + '</div>' +
+          '<div class="an-stat-lbl">Reached</div>' +
+          '<div class="an-stat-sub">Completed this week</div>' +
+        '</div>' +
+      '</div>';
+
+    var lastWeekHtml = ''; // removed per spec
+
+    // ── Range toggle ──
+    var toggleHtml =
+      '<div class="an-range-toggle">' +
+        '<button class="an-range-btn' + (analyticsRange === '1m' ? ' active' : '') + '" onclick="setAnalyticsRange(\'1m\')">Last Month</button>' +
+        '<button class="an-range-btn' + (analyticsRange === '3m' ? ' active' : '') + '" onclick="setAnalyticsRange(\'3m\')">Last 3 Months</button>' +
+      '</div>';
+
+    // ── Line chart ──
+    var chartHtml = buildLineChart(filtered, analyticsRange);
+
+    // ── Best week callout ──
+    var bestInRange = filtered.reduce(function(b, w){ return w.reached > b.reached ? w : b; }, filtered[0] || {});
+    var bestHtml = bestInRange && bestInRange.reached > 0
+      ? '<div style="background:var(--accent-soft);border:1px solid rgba(36,76,67,.15);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:20px;font-size:13px;color:var(--accent);">' +
+          '🏆 <strong>Best week (reached):</strong> w/c ' + esc(bestInRange.label) + ' — ' + bestInRange.reached + ' person' + (bestInRange.reached !== 1 ? 's' : '') + ' reached' +
+        '</div>'
+      : '';
+
+    // ── Silent people ──
+    var silentHtml = '';
+    if (silent.length) {
+      silentHtml += '<div class="an-chart-card" style="border-left:3px solid var(--danger);">';
+      silentHtml += '<div class="an-chart-title" style="color:var(--danger);">⚠ No Contact in 6+ Weeks <span style="font-weight:400;font-size:12px;color:var(--muted);">(' + silent.length + ' ' + (silent.length === 1 ? 'person' : 'people') + ')</span></div>';
+      silent.forEach(function(p) {
+        var sub = p.lastContact
+          ? 'Last contact: ' + esc(p.lastContact) + (p.weeksSince ? ' (' + p.weeksSince + ' weeks ago)' : '')
+          : 'No contact recorded';
+        var pid = esc(p.pid || '');
+        silentHtml += '<div class="an-silent-row" style="cursor:pointer;" onclick="goLogPerson(\'' + pid + '\',\'' + esc(p.name) + '\')">' +
+          '<div class="an-silent-av">' + esc(ini(p.name)) + '</div>' +
+          '<div style="flex:1;min-width:0;"><div class="an-silent-name">' + esc(p.name) + '</div><div class="an-silent-sub">' + sub + '</div></div>' +
+          '<div style="font-size:11px;font-weight:600;color:var(--accent);flex-shrink:0;padding-left:8px;">Log →</div>' +
+        '</div>';
+      });
+      silentHtml += '</div>';
+    } else {
+      silentHtml = '<div style="background:var(--success-bg);border:1px solid rgba(2,122,72,.15);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:20px;font-size:13px;color:var(--success);">✓ Everyone has been contacted in the last 6 weeks.</div>';
+    }
+
+    el.innerHTML = statsHtml + lastWeekHtml + toggleHtml + chartHtml + bestHtml + silentHtml + buildRoleFrequency();
+  }
+
+  function buildRoleFrequency() {
+    var roles = (roleFreqData && roleFreqData.roles) ? roleFreqData.roles : [];
+    if (!roles.length) return '';
+
+    var rows = roles.map(function(r) {
+      // Colour-code the avg days: green ≤21, gold ≤42, red >42
+      var col = r.avgDays <= 21 ? 'var(--success)' : r.avgDays <= 42 ? 'var(--gold)' : 'var(--danger)';
+      var bar = Math.min(100, Math.round(r.avgDays / 60 * 100)); // max bar at 60 days
+      return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);">' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(r.role) + '</div>' +
+          '<div style="margin-top:5px;height:5px;background:var(--line);border-radius:99px;overflow:hidden;">' +
+            '<div style="width:' + bar + '%;height:100%;background:' + col + ';border-radius:99px;"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="text-align:right;flex-shrink:0;">' +
+          '<div style="font-size:17px;font-weight:700;color:' + col + ';letter-spacing:-0.02em;">' + r.avgDays + 'd</div>' +
+          '<div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">' + r.peopleCount + ' ' + (r.peopleCount === 1 ? 'person' : 'people') + '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    return '<div class="an-chart-card" style="margin-bottom:20px;">' +
+      '<div class="an-chart-title">Avg Contact Frequency by Role</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Average days between successful contacts · people with 2+ calls</div>' +
+      '<div style="margin-bottom:-10px;">' + rows + '</div>' +
+    '</div>';
+  }
+
+  function buildLineChart(wks, range) {
+    if (!wks || !wks.length) return '<div class="hist-empty">No call data yet.</div>';
+
+    var PAD_L = 32, PAD_R = 12, PAD_T = 20, PAD_B = 32;
+    var H = 160;
+    var minW = 320;
+    var pointSpacing = range === '1m' ? 60 : 44;
+    var svgW = Math.max(minW, PAD_L + (wks.length - 1) * pointSpacing + PAD_R);
+
+    var maxReached = Math.max.apply(null, wks.map(function(w){ return w.reached; }));
+    if (maxReached === 0) maxReached = 1;
+
+    // Y position for a value
+    function yPos(v) { return PAD_T + H - Math.round(H * v / maxReached); }
+
+    // X position for index
+    function xPos(i) { return PAD_L + i * pointSpacing; }
+
+    // Grid lines
+    var grid = '';
+    var steps = Math.min(maxReached, 4);
+    for (var g = 1; g <= steps; g++) {
+      var gv = Math.round(maxReached * g / steps);
+      var gy = yPos(gv);
+      grid += '<line x1="' + PAD_L + '" y1="' + gy + '" x2="' + (svgW - PAD_R) + '" y2="' + gy + '" stroke="#e5e0d5" stroke-width="1" stroke-dasharray="3,3"/>';
+      grid += '<text x="' + (PAD_L - 5) + '" y="' + (gy + 4) + '" text-anchor="end" font-size="9" fill="#7a7870">' + gv + '</text>';
+    }
+
+    // Build polyline points
+    var pts = wks.map(function(w, i){ return xPos(i) + ',' + yPos(w.reached); }).join(' ');
+
+    // Filled area path (under the line)
+    var areaPath = 'M ' + xPos(0) + ' ' + yPos(wks[0].reached);
+    for (var i = 1; i < wks.length; i++) areaPath += ' L ' + xPos(i) + ' ' + yPos(wks[i].reached);
+    areaPath += ' L ' + xPos(wks.length - 1) + ' ' + (PAD_T + H);
+    areaPath += ' L ' + xPos(0) + ' ' + (PAD_T + H) + ' Z';
+
+    // Find best week index
+    var bestIdx = 0;
+    wks.forEach(function(w, i){ if (w.reached > wks[bestIdx].reached) bestIdx = i; });
+
+    // Dots and labels
+    var dots = '';
+    wks.forEach(function(w, i) {
+      var x = xPos(i), y = yPos(w.reached);
+      var isLast = i === wks.length - 1;
+      var isBest = i === bestIdx && w.reached > 0;
+      var r = (isLast || isBest) ? 5 : 3.5;
+      var fill = isBest ? '#b89146' : 'var(--accent)';
+      var stroke = isBest ? '#92400e' : '#244c43';
+      dots += '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.5"/>';
+
+      // Value label above dot (only show if reached > 0 or it's endpoint)
+      if (w.reached > 0 || isLast) {
+        dots += '<text x="' + x + '" y="' + (y - 8) + '" text-anchor="middle" font-size="10" font-weight="600" fill="' + (isBest ? '#92400e' : '#244c43') + '">' + w.reached + '</text>';
+      }
+
+      // X axis label (week start)
+      var parts = w.label.split(' ');
+      var shortLbl = parts.length === 2 ? parts[0].slice(0,1) + parts[1] : w.label;
+      var xColor  = isLast ? '#244c43' : isBest ? '#92400e' : '#7a7870';
+      var xWeight = (isLast || isBest) ? '700' : '400';
+      dots += '<text x="' + x + '" y="' + (PAD_T + H + 16) + '" text-anchor="middle" font-size="9" fill="' + xColor + '" font-weight="' + xWeight + '">' + esc(shortLbl) + '</text>';
+    });
+
+    // Axes
+    var axes =
+      '<line x1="' + PAD_L + '" y1="' + PAD_T + '" x2="' + PAD_L + '" y2="' + (PAD_T + H) + '" stroke="#e5e0d5" stroke-width="1"/>' +
+      '<line x1="' + PAD_L + '" y1="' + (PAD_T + H) + '" x2="' + (svgW - PAD_R) + '" y2="' + (PAD_T + H) + '" stroke="#e5e0d5" stroke-width="1"/>';
+
+    var totalH = PAD_T + H + PAD_B;
+
+    return '<div class="an-line-card">' +
+      '<div class="an-line-title">People Reached per Week</div>' +
+      '<div class="an-line-sub">' + (range === '1m' ? 'Last 4 weeks' : 'Last 12 weeks') + ' · ★ best week · ● current week</div>' +
+      '<div class="an-line-wrap">' +
+        '<svg width="' + svgW + '" height="' + totalH + '" viewBox="0 0 ' + svgW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">' +
+          grid +
+          '<defs><linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#244c43" stop-opacity="0.15"/><stop offset="100%" stop-color="#244c43" stop-opacity="0"/></linearGradient></defs>' +
+          '<path d="' + areaPath + '" fill="url(#lineGrad)"/>' +
+          '<polyline points="' + pts + '" fill="none" stroke="#244c43" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
+          dots + axes +
+        '</svg>' +
+      '</div>' +
+    '</div>';
+  }
 
   // ── Pull-to-refresh on dashboard ─────────────────────────
   (function() {
@@ -1480,11 +1789,11 @@
     </div>
     <div class="modal-field">
       <label class="modal-label">Role <span style="font-weight:400;color:var(--muted)">— optional</span></label>
-      <input class="modal-input" id="em-role" type="text" placeholder="e.g. Elder, Deacon, Member">
+      <input class="modal-input" id="em-role" type="text" placeholder="e.g. Coordinator, Cell leader, Manager">
     </div>
     <div class="modal-field">
       <label class="modal-label">Fellowship <span style="font-weight:400;color:var(--muted)">— optional</span></label>
-      <input class="modal-input" id="em-fellowship" type="text" placeholder="e.g. Youth, Seniors">
+      <input class="modal-input" id="em-fellowship" type="text" placeholder="e.g. University of Manitoba, University of Lethbridge">
     </div>
     <div class="modal-field">
       <label class="modal-label">Priority <span style="font-weight:400;color:var(--muted)">— optional</span></label>
