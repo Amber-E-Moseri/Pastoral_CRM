@@ -11,17 +11,61 @@
     if (list) list.innerHTML = '';
     var inp = document.getElementById('todo-input');
     if (inp) inp.value = '';
+    var dueInp = document.getElementById('todo-due-input');
+    if (dueInp) dueInp.value = '';
+    var dueRow = document.querySelector('.log-todo-due-row');
+    if (dueRow) dueRow.classList.remove('on');
+    var dueToggle = document.getElementById('todo-due-toggle');
+    if (dueToggle) dueToggle.textContent = '+ Add due date';
   };
 
   window.addTodoItem = function(){
     var inp = document.getElementById('todo-input');
+    var dueInp = document.getElementById('todo-due-input');
     if (!inp) return;
     var text = inp.value.trim();
     if (!text) return;
-    _logTodos.push(text);
+    var dueDate = dueInp ? dueInp.value : '';
+    _logTodos.push({ text: text, dueDate: dueDate || '' });
     inp.value = '';
+    if (dueInp) dueInp.value = '';
+    var dueRow = document.querySelector('.log-todo-due-row');
+    if (dueRow) dueRow.classList.remove('on');
+    var dueToggle = document.getElementById('todo-due-toggle');
+    if (dueToggle) dueToggle.textContent = '+ Add due date';
     renderLogTodos();
     inp.focus();
+  };
+
+  // Ensure any typed (but not yet added) action item is captured before saving a call.
+  window.flushPendingLogTodoItem = function(){
+    var inp = document.getElementById('todo-input');
+    if (!inp) return false;
+    if (!String(inp.value || '').trim()) return false;
+    window.addTodoItem();
+    return true;
+  };
+
+  window.toggleLogTodoDueDate = function(){
+    var dueRow = document.querySelector('.log-todo-due-row');
+    var dueInp = document.getElementById('todo-due-input');
+    var dueToggle = document.getElementById('todo-due-toggle');
+    if (!dueRow || !dueInp || !dueToggle) return;
+    var isOn = dueRow.classList.toggle('on');
+    if (isOn) {
+      dueToggle.textContent = 'Due date added';
+      setTimeout(function(){ dueInp.focus(); }, 0);
+      return;
+    }
+    dueInp.value = '';
+    dueToggle.textContent = '+ Add due date';
+  };
+
+  window.onLogTodoDueDateChange = function(){
+    var dueInp = document.getElementById('todo-due-input');
+    var dueToggle = document.getElementById('todo-due-toggle');
+    if (!dueInp || !dueToggle) return;
+    dueToggle.textContent = dueInp.value ? 'Due date added' : '+ Add due date';
   };
 
   function renderLogTodos(){
@@ -29,9 +73,11 @@
     if (!list) return;
     list.innerHTML = _logTodos.map(function(item, i){
       var text = typeof item === 'object' ? item.text : item;
+      var due = typeof item === 'object' ? item.dueDate : '';
       return '<div class="todo-item">' +
         '<div style="flex:1;min-width:0;">' +
           '<span class="todo-text">' + escHtml(text) + '</span>' +
+          (due ? '<div class="todo-meta">Due: ' + escHtml(due) + '</div>' : '') +
         '</div>' +
         '<button class="todo-del" onclick="removeLogTodo(' + i + ')" title="Remove">&#215;</button>' +
       '</div>';
@@ -46,7 +92,10 @@
   // Override getTodoItems for log form action items
   window.getTodoItems = function(){
     return _logTodos.map(function(item){
-      return String(typeof item === 'object' ? item.text : item || '').trim();
+      if (!item) return null;
+      var text = String(typeof item === 'object' ? item.text : item || '').trim();
+      var dueDate = typeof item === 'object' ? item.dueDate : '';
+      return text ? { text: text, dueDate: dueDate || '' } : null;
     }).filter(Boolean);
   };
 
@@ -132,6 +181,39 @@
       .replace(/[^\w\s'-]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  function todoAssigneeOptionsHtml_(selectedId) {
+    var selected = String(selectedId || 'manual');
+    var options = [{ id: 'manual', name: 'My Tasks' }];
+    (_todoPeople || []).forEach(function(p){
+      var id = String(p && p.id || '');
+      if (!id || id === 'manual') return;
+      options.push({ id: id, name: String((p && p.name) || id) });
+    });
+    var seen = {};
+    options = options.filter(function(o){
+      if (seen[o.id]) return false;
+      seen[o.id] = true;
+      return true;
+    }).sort(function(a, b){
+      if (a.id === 'manual') return -1;
+      if (b.id === 'manual') return 1;
+      var an = String(a.name || '').toLowerCase();
+      var bn = String(b.name || '').toLowerCase();
+      return an < bn ? -1 : (an > bn ? 1 : 0);
+    });
+    return options.map(function(o){
+      return '<option value="' + escHtml(o.id) + '"' + (o.id === selected ? ' selected' : '') + '>' + escHtml(o.name) + '</option>';
+    }).join('');
+  }
+
+  function resolveAssigneeName_(personId, fallbackName) {
+    var id = String(personId || 'manual');
+    if (id === 'manual') return 'My Tasks';
+    var found = (_todoPeople || []).find(function(p){ return String((p && p.id) || '') === id; });
+    if (found) return String(found.name || found.id || 'My Tasks');
+    return String(fallbackName || 'My Tasks');
   }
 
   function resolveTodoMention_(rawText) {
@@ -305,7 +387,15 @@
     if (!body) return;
     var list = _todoFilter === 'open' ? todos.filter(function(t){ return !t.done; }) : todos;
     if (!list.length){
-      body.innerHTML = '<div class="hist-empty">' + (_todoFilter === 'open' ? 'No open to-dos &#10003;' : 'No action items yet.') + '</div>';
+      if (_todoFilter === 'open') {
+        body.innerHTML =
+          '<div class="hist-empty">' +
+            '<div class="todo-empty-title">You\'re all caught up 🎉</div>' +
+            '<div class="todo-empty-sub">Add a task to get started</div>' +
+          '</div>';
+      } else {
+        body.innerHTML = '<div class="hist-empty">No action items yet.</div>';
+      }
       return;
     }
 
@@ -381,8 +471,12 @@
         html += '<input type="checkbox" class="todo-cb" ' + (done ? 'checked' : '') + ' onchange="toggleTodo(\'' + escHtml(t.id) + '\',this.checked)">';
         html += '<div style="flex:1;min-width:0;">';
         if (isEditing) {
-          html += '<input class="todo-edit-input" type="text" value="' + escHtml(t.text) + '" maxlength="240" onkeydown="if(event.key===\'Enter\'){event.preventDefault();saveTodoInline(\'' + escHtml(t.id) + '\');} if(event.key===\'Escape\'){event.preventDefault();cancelTodoInline();}">';
-          html += '<input class="todo-edit-input" type="date" value="' + escHtml(todoIsoFromAny_(t.dueDateIso || t.dueDate)) + '" style="margin-top:6px;" title="Due date">';
+          html += '<input class="todo-edit-input todo-edit-text" type="text" value="' + escHtml(t.text) + '" maxlength="240" onkeydown="if(event.key===\'Enter\'){event.preventDefault();saveTodoInline(\'' + escHtml(t.id) + '\');} if(event.key===\'Escape\'){event.preventDefault();cancelTodoInline();}">';
+          html += '<input class="todo-edit-input todo-edit-due" type="date" value="' + escHtml(todoIsoFromAny_(t.dueDateIso || t.dueDate)) + '" style="margin-top:6px;" title="Due date">';
+          html += '<div class="todo-edit-assignee-row">';
+          html += '<span class="todo-edit-assignee-label">Assigned</span>';
+          html += '<select class="todo-edit-assignee" title="Change assignee">' + todoAssigneeOptionsHtml_(t.personId) + '</select>';
+          html += '</div>';
           html += '<div class="todo-edit-actions">';
           html += '<button class="todo-edit-btn save" onclick="saveTodoInline(\'' + escHtml(t.id) + '\')" ' + (_editingTodoBusy ? 'disabled' : '') + '>Save</button>';
           html += '<button class="todo-edit-btn" onclick="cancelTodoInline()" ' + (_editingTodoBusy ? 'disabled' : '') + '>Cancel</button>';
@@ -462,7 +556,22 @@
 
     apiFetch('deleteTodo', { todoId: todoId }).then(function(res){
       if (!res || res.success !== true) throw new Error((res && res.error) ? res.error : 'Delete failed');
+      // Also clear any matching local-only shadow entry so it does not reappear as "Saved locally".
+      var local = getManualTodos();
+      if (t) {
+        var pid = String(t.personId || '');
+        var txt = String(t.text || '').trim().toLowerCase();
+        var due = todoIsoFromAny_(t.dueDateIso || t.dueDate);
+        local = local.filter(function(item){
+          var samePid = String(item.personId || '') === pid;
+          var sameTxt = String(item.text || '').trim().toLowerCase() === txt;
+          var sameDue = todoIsoFromAny_(item.dueDateIso || item.dueDate) === due;
+          return !(samePid && sameTxt && sameDue);
+        });
+        setManualTodos(local);
+      }
       _allTodos = _allTodos.filter(function(item){ return item.id !== todoId; });
+      _allTodos = mergeTodos(_allTodos.filter(function(item){ return !item.localOnly; }));
       renderTodos(_allTodos);
       updateHomeTodoSub(_allTodos);
       if (window.showUxToast) showUxToast('Task deleted');
@@ -500,18 +609,22 @@
     if (!t) return;
 
     var row = document.getElementById('tdi-' + todoId);
-    var inputs = row ? row.querySelectorAll('.todo-edit-input') : null;
-    var inp = (inputs && inputs.length) ? inputs[0] : null;
-    var dueInp = (inputs && inputs.length > 1) ? inputs[1] : null;
+    var inp = row ? row.querySelector('.todo-edit-text') : null;
+    var dueInp = row ? row.querySelector('.todo-edit-due') : null;
+    var assigneeSel = row ? row.querySelector('.todo-edit-assignee') : null;
     var current = String(t.text || '');
     var next = String(inp ? inp.value : current).trim();
     var currentDue = todoIsoFromAny_(t.dueDateIso || t.dueDate);
     var nextDue = todoIsoFromAny_(dueInp ? dueInp.value : currentDue);
+    var currentPid = String(t.personId || 'manual');
+    var nextPid = String(assigneeSel ? assigneeSel.value : currentPid || 'manual');
+    var currentPname = String(t.personName || 'My Tasks');
+    var nextPname = resolveAssigneeName_(nextPid, currentPname);
     if (!next) {
       if (window.showUxToast) showUxToast('Task note cannot be empty');
       return;
     }
-    if (next === current && nextDue === currentDue) {
+    if (next === current && nextDue === currentDue && nextPid === currentPid) {
       _editingTodoId = null;
       _editingTodoBusy = false;
       renderTodos(_allTodos);
@@ -520,9 +633,13 @@
 
     var oldText = current;
     var oldDue = currentDue;
+    var oldPid = currentPid;
+    var oldPname = currentPname;
     t.text = next;
     t.dueDateIso = nextDue || '';
     t.dueDate = nextDue ? new Date(nextDue + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '';
+    t.personId = nextPid;
+    t.personName = nextPname;
     _editingTodoBusy = true;
     renderTodos(_allTodos);
 
@@ -532,6 +649,8 @@
           item.text = next;
           item.dueDateIso = nextDue || '';
           item.dueDate = t.dueDate || '';
+          item.personId = nextPid;
+          item.personName = nextPname;
         }
         return item;
       });
@@ -546,6 +665,7 @@
     var reqs = [];
     if (next !== current) reqs.push(apiFetch('updateTodoText', { todoId: todoId, text: next }));
     if (nextDue !== currentDue) reqs.push(apiFetch('updateTodoDueDate', { todoId: todoId, dueDate: nextDue || '' }));
+    if (nextPid !== currentPid) reqs.push(apiFetch('updateTodoAssignee', { todoId: todoId, personId: nextPid, personName: nextPname }));
     Promise.all(reqs).then(function(results){
       if (results.some(function(res){ return !res || res.success !== true; })) throw new Error('Update failed');
       _editingTodoId = null;
@@ -556,6 +676,8 @@
       t.text = oldText;
       t.dueDateIso = oldDue || '';
       t.dueDate = oldDue ? new Date(oldDue + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '';
+      t.personId = oldPid;
+      t.personName = oldPname;
       _editingTodoBusy = false;
       renderTodos(_allTodos);
       if (window.showUxToast) showUxToast('Could not update task');

@@ -621,10 +621,25 @@
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     var todayKey = new Date().toISOString().slice(0,10);
     if (!force && localStorage.getItem('ct-due-summary-notified') === todayKey) return;
-    apiFetch('duePeople').then(function(data){
-      var dueToday = (data.today || []).length + (data.overdue || []).length + (data.callbacks || []).length;
-      if (dueToday > 0) {
-        notify('Call Tracker', 'You have ' + dueToday + ' people due or overdue today.', 'ct-daily-summary');
+    Promise.all([apiFetch('duePeople'), apiFetch('getTodos')]).then(function(res){
+      var data = res[0] || {};
+      var todosRes = res[1] || {};
+      var duePeople = (data.today || []).length + (data.overdue || []).length + (data.callbacks || []).length;
+      var dueTasks = 0;
+      var todos = Array.isArray(todosRes.todos) ? todosRes.todos : [];
+      if (todos.length) {
+        todos.forEach(function(t){
+          if (!t || t.done) return;
+          var iso = String(t.dueDateIso || '').trim();
+          if (iso === todayKey) dueTasks++;
+        });
+      }
+      var total = duePeople + dueTasks;
+      if (total > 0) {
+        var bits = [];
+        if (duePeople > 0) bits.push(duePeople + ' people due/overdue');
+        if (dueTasks > 0) bits.push(dueTasks + ' tasks due today');
+        notify('Call Tracker', 'Today: ' + bits.join(' • ') + '.', 'ct-daily-summary');
         localStorage.setItem('ct-due-summary-notified', todayKey);
       }
     }).catch(function(){});

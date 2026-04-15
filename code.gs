@@ -1,11 +1,12 @@
 // ============================================================
-// CALL TRACKER v3.0 — Google Apps Script
+// CALL TRACKER v3.1 — Google Apps Script
 // ============================================================
 
 const SHEET_PEOPLE       = 'PEOPLE';
 const SHEET_INTERACTIONS = 'INTERACTIONS';
 const SHEET_FOLLOWUPS    = 'FOLLOWUPS';
 const SHEET_SETTINGS     = 'SETTINGS';
+const SHEET_TODOS        = 'TODOS';
 
 const RESULT_REACHED       = 'Reached';
 const STATUS_CALL_BACK     = 'Call Back';
@@ -14,7 +15,10 @@ const STATUS_COMPLETED     = 'Completed';
 
 const CACHE_KEY_DUE  = 'duePeople';
 const CACHE_KEY_PPL  = 'people';
+const CACHE_KEY_TODAY = 'todayCount';
+const CACHE_KEY_TODOS_ALL = 'todosAll';
 const CACHE_TTL      = 300; // 5 minutes
+const CACHE_TTL_SHORT = 120; // 2 minutes
 
 
 // ─── ACTIVE STATUS HELPER ────────────────────────────────────
@@ -124,6 +128,51 @@ function doGet(e) {
       return json_(api_savePersonNotes(body.personId, body.notes));
     }
 
+    // ── NEW: today's call count from LastAttempt ──
+    if (action === 'getTodayCount') {
+      return json_(api_getTodayCount());
+    }
+
+    if (action === 'getTodos') {
+      const personId = e.parameter.personId || '';
+      return json_(api_getTodos(personId));
+    }
+
+    if (action === 'saveTodos') {
+      const body = JSON.parse(e.parameter.payload || '{}');
+      return json_(api_saveTodos(body));
+    }
+
+    if (action === 'updateTodo') {
+      const todoId = e.parameter.todoId || '';
+      const done   = e.parameter.done   || 'false';
+      return json_(api_updateTodo(todoId, done));
+    }
+
+    if (action === 'updateTodoText') {
+      const todoId = e.parameter.todoId || '';
+      const text   = e.parameter.text   || '';
+      return json_(api_updateTodoText(todoId, text));
+    }
+
+    if (action === 'updateTodoDueDate') {
+      const todoId  = e.parameter.todoId || '';
+      const dueDate = e.parameter.dueDate !== undefined ? e.parameter.dueDate : '';
+      return json_(api_updateTodoDueDate(todoId, dueDate));
+    }
+
+    if (action === 'updateTodoAssignee') {
+      const todoId = e.parameter.todoId || '';
+      const personId = e.parameter.personId || '';
+      const personName = e.parameter.personName || '';
+      return json_(api_updateTodoAssignee(todoId, personId, personName));
+    }
+
+    if (action === 'deleteTodo') {
+      const todoId = e.parameter.todoId || '';
+      return json_(api_deleteTodo(todoId));
+    }
+
     return json_({ ok: true });
 
   } catch (err) {
@@ -157,7 +206,26 @@ function cachePut_(key, data) {
 }
 
 function cacheBust_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEY_DUE, CACHE_KEY_PPL]);
+  CacheService.getScriptCache().removeAll([
+    CACHE_KEY_DUE,
+    CACHE_KEY_PPL,
+    CACHE_KEY_TODAY,
+    CACHE_KEY_TODOS_ALL
+  ]);
+}
+
+function getSheetValues_(sheet) {
+  if (!sheet) return [[]];
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 1 || lastCol < 1) return [[]];
+  return sheet.getRange(1, 1, lastRow, lastCol).getValues();
+}
+
+function headerMap_(headers) {
+  const m = {};
+  headers.forEach((h, i) => { m[String(h)] = i; });
+  return m;
 }
 
 
@@ -189,6 +257,7 @@ function setupSystem() {
   const followupHeaders    = ['TaskID','CreatedAt','PersonID','TaskType','DueDateTime',
                               'Status','LinkedInteractionID','CompletedAt','CompletionNote'];
   const settingsData       = [
+    ['NOTIFICATIONS_ENABLED','true'],
     ['REMINDER_EMAIL','your@email.com'],
     ['MORNING_REMINDER_HOUR','8'],
     ['DUESTATUS_REFRESH_HOUR','1'],
@@ -207,9 +276,11 @@ function setupSystem() {
     return sheet;
   }
 
+  const todoHeaders = ['TodoID','CreatedAt','PersonID','PersonName','InteractionID','Text','DueDate','Done','CompletedAt'];
   ensureSheet(SHEET_PEOPLE, peopleHeaders);
   ensureSheet(SHEET_INTERACTIONS, interactionHeaders);
   ensureSheet(SHEET_FOLLOWUPS, followupHeaders);
+  ensureSheet(SHEET_TODOS, todoHeaders);
 
   let settings = ss.getSheetByName(SHEET_SETTINGS);
   if (!settings) {
@@ -231,7 +302,8 @@ function api_getPeople() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
   if (!sheet) return [];
 
-  const data    = sheet.getDataRange().getValues();
+  const data    = getSheetValues_(sheet);
+  if (!data.length || !data[0] || !data[0].length) return [];
   const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
   const idx     = h => headers.indexOf(h);
 
@@ -284,7 +356,7 @@ function api_getInteractions(personId) {
 
 // ─── API: GET PEOPLE WITH CADENCE ────────────────────────────
 
-const CADENCE_COL = 4; // Column E (0-based)
+const CADENCE_COL = 3; // Column D (0-based index)
 
 function api_getPeopleWithCadence() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
@@ -296,7 +368,7 @@ function api_getPeopleWithCadence() {
 
   return data.slice(1)
     .map(row => {
-      const raw      = Number(row[CADENCE_COL]);
+      const raw      = Number(row[idx('cadencedays')]);
       const isActive = isActiveVal_(row[idx('active')]);
       return {
         id:          row[idx('personid')],
@@ -325,10 +397,11 @@ function api_saveCadence(personId, cadenceDays) {
   const data    = sheet.getDataRange().getValues();
   const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
   const pidCol  = headers.indexOf('personid');
+  const cadCol  = headers.indexOf('cadencedays');
 
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][pidCol]) === String(personId)) {
-      sheet.getRange(i + 1, CADENCE_COL + 1).setValue(cadenceDays);
+      sheet.getRange(i + 1, cadCol + 1).setValue(cadenceDays);
       cacheBust_();
       return { success: true };
     }
@@ -364,6 +437,7 @@ function api_setActive(personId, active) {
 // ─── API: GET / SAVE APP SETTINGS ────────────────────────────
 
 const SETTINGS_META = {
+  NOTIFICATIONS_ENABLED:  { label: 'Notifications',         desc: 'Turn daily and weekly reminder notifications on or off.' },
   REMINDER_EMAIL:         { label: 'Reminder Email',        desc: 'Email address(es) to receive daily and weekly reminders. Separate multiple with commas.' },
   MORNING_REMINDER_HOUR:  { label: 'Morning Reminder Hour', desc: 'Hour (0–23) to send the daily due-now email.' },
   DUESTATUS_REFRESH_HOUR: { label: 'Due Status Refresh Hour', desc: 'Hour (0–23) to automatically refresh due statuses.' },
@@ -375,6 +449,7 @@ const SETTINGS_META = {
 function api_getSettings() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_SETTINGS);
   if (!sheet) return [];
+  ensureSettingKey_(sheet, 'NOTIFICATIONS_ENABLED', 'true');
   const data = sheet.getDataRange().getValues();
   return data.map(function(row) {
     const key  = String(row[0]).trim();
@@ -425,7 +500,6 @@ function api_addPerson(payload) {
     const pid     = 'P' + Date.now();
     const cadence = parseInt(payload.cadenceDays) > 0 ? parseInt(payload.cadenceDays) : 30;
     const now     = new Date();
-    const nextDue = new Date(now.getTime() + cadence * 86400000);
 
     const row = new Array(headers.length).fill('');
     if (idx('personid')   >= 0) row[idx('personid')]    = pid;
@@ -434,7 +508,9 @@ function api_addPerson(payload) {
     if (idx('fellowship') >= 0) row[idx('fellowship')]  = String(payload.fellowship || '').trim();
     if (idx('cadencedays')>= 0) row[idx('cadencedays')] = cadence;
     if (idx('active')     >= 0) row[idx('active')]      = true;
-    if (idx('nextduedate')>= 0) row[idx('nextduedate')] = nextDue;
+    // New people start as Scheduled with no explicit due date,
+    // so they appear in the "No Date Set" bucket until first planning/log.
+    if (idx('nextduedate')>= 0) row[idx('nextduedate')] = '';
     if (idx('duestatus')  >= 0) row[idx('duestatus')]   = 'Scheduled';
     if (idx('priority')   >= 0) row[idx('priority')]    = String(payload.priority   || '').trim();
 
@@ -449,9 +525,6 @@ function api_addPerson(payload) {
 
 // ─── DUPLICATE INTERACTION CHECK ─────────────────────────────
 
-// FIX: Truncate summary before building the cache key to prevent
-// "Argument too large: key" error when summaries are long.
-// CacheService keys have a 250-character limit.
 function isDuplicateInteraction_(payload) {
   const cache  = CacheService.getScriptCache();
   const keyObj = {
@@ -491,6 +564,7 @@ function saveInteractionCore_(payload) {
   const iId          = 'I' + now.getTime();
   const outcomeType  = deriveOutcomeType_(payload.result);
   const nextActionDT = payload.nextActionDateTime ? new Date(payload.nextActionDateTime) : '';
+  const channel      = String(payload.channel || 'Call').trim() || 'Call';
 
   if ((payload.nextAction === 'Callback' || payload.nextAction === 'Follow-up') &&
       !(nextActionDT instanceof Date && !isNaN(nextActionDT))) {
@@ -498,42 +572,40 @@ function saveInteractionCore_(payload) {
   }
 
   interactions.appendRow([
-    iId, now, payload.personId, payload.fullName || '', 'Call',
+    iId, now, payload.personId, payload.fullName || '', channel,
     payload.result, outcomeType, payload.summary || '',
     payload.nextAction || 'None', nextActionDT, true
   ]);
 
-  const pData = people.getDataRange().getValues();
+  const pData = getSheetValues_(people);
   const pH    = pData[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
-  const pIdx  = h => pH.indexOf(h);
+  const pMap  = headerMap_(pH);
+  const pIdx  = h => pMap[h];
 
   for (let i = 1; i < pData.length; i++) {
     if (String(pData[i][pIdx('personid')]) !== String(payload.personId)) continue;
 
-    const rowNum  = i + 1;
-    const updates = {};
-    updates[pIdx('lastattempt')] = now;
+    const rowNum = i + 1;
+    const rowVals = pData[i].slice();
+    rowVals[pIdx('lastattempt')] = now;
 
     if (outcomeType === 'Successful') {
-      updates[pIdx('lastsuccessfulcontact')] = now;
+      rowVals[pIdx('lastsuccessfulcontact')] = now;
     }
 
     if (payload.nextAction === 'Callback' || payload.nextAction === 'Follow-up') {
-      updates[pIdx('nextduedate')] = nextActionDT;
-      updates[pIdx('duestatus')]   = STATUS_CALL_BACK;
+      rowVals[pIdx('nextduedate')] = nextActionDT;
+      rowVals[pIdx('duestatus')]   = STATUS_CALL_BACK;
     } else if (outcomeType === 'Successful') {
-      const cadence = Number(pData[i][CADENCE_COL]) > 0
-        ? Number(pData[i][CADENCE_COL])
+      const cadence = Number(pData[i][pIdx('cadencedays')]) > 0
+        ? Number(pData[i][pIdx('cadencedays')])
         : 30;
       const nextDue = resolveNextActionDateTime_(nextActionDT, cadence, now);
-      updates[pIdx('nextduedate')] = nextDue;
-      updates[pIdx('duestatus')]   = STATUS_COMPLETED;
+      rowVals[pIdx('nextduedate')] = nextDue;
+      rowVals[pIdx('duestatus')]   = STATUS_COMPLETED;
       closeOpenFollowupsForPerson_(followups, payload.personId, now);
     }
-
-    for (const [colIdx, val] of Object.entries(updates)) {
-      people.getRange(rowNum, Number(colIdx) + 1).setValue(val);
-    }
+    people.getRange(rowNum, 1, 1, pH.length).setValues([rowVals]);
 
     break;
   }
@@ -595,11 +667,12 @@ function computeDuePeople_() {
   const followups = ss.getSheetByName(SHEET_FOLLOWUPS);
   if (!people) return { callbacks:[], overdue:[], today:[], thisWeek:[], nextWeek:[], noDate:[] };
 
-  const pData = people.getDataRange().getValues();
+  const pData = getSheetValues_(people);
+  if (!pData.length || !pData[0] || !pData[0].length) return { callbacks:[], overdue:[], today:[], thisWeek:[], nextWeek:[], noDate:[] };
   const pH    = pData[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
   const pIdx  = h => pH.indexOf(h);
 
-  const fData = followups ? followups.getDataRange().getValues() : [[]];
+  const fData = followups ? getSheetValues_(followups) : [[]];
   const fH    = fData[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
   const fIdx  = h => fH.indexOf(h);
 
@@ -621,6 +694,10 @@ function computeDuePeople_() {
   const weekEnd     = new Date(todayStart.getTime() + 7  * 86400000);
   const nextWeekEnd = new Date(todayStart.getTime() + 14 * 86400000);
 
+  // Only callbacks, overdue, today, thisWeek and nextWeek are returned.
+  // People due beyond 14 days are intentionally excluded — they don't need
+  // attention yet and would clutter the dashboard.
+  // People with no due date at all still appear in noDate.
   const buckets = { callbacks:[], overdue:[], today:[], thisWeek:[], nextWeek:[], noDate:[] };
 
   for (let i = 1; i < pData.length; i++) {
@@ -647,8 +724,14 @@ function computeDuePeople_() {
       continue;
     }
 
+    // Newly added/scheduled people should appear under "No Date Set"
+    // until a concrete due date workflow is created for them.
+    if (String(status || '').trim().toLowerCase() === 'scheduled') {
+      buckets.noDate.push(person);
+      continue;
+    }
+
     if (!due) {
-      // No due date set at all
       buckets.noDate.push(person);
     } else {
       const d = new Date(due);
@@ -656,10 +739,7 @@ function computeDuePeople_() {
       else if (d < todayEnd)    buckets.today.push(person);
       else if (d < weekEnd)     buckets.thisWeek.push(person);
       else if (d < nextWeekEnd) buckets.nextWeek.push(person);
-      else                      buckets.noDate.push(person); // FIX: future-scheduled people
-                                                              // (e.g. newly added, due in 28+ days)
-                                                              // were previously falling through all
-                                                              // conditions and disappearing entirely.
+      // Beyond 14 days: intentionally not shown on dashboard.
     }
   }
 
@@ -739,14 +819,56 @@ function api_getQuickStats() {
 }
 
 
+// ─── API: TODAY'S CALL COUNT ─────────────────────────────────
+// Counts INTERACTIONS rows logged today (true call logs count).
+// Used by the "X calls logged today" counter on the dashboard.
+
+function api_getTodayCount() {
+  const cached = cacheGet_(CACHE_KEY_TODAY);
+  if (cached && typeof cached.count === 'number') return cached;
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_INTERACTIONS);
+  if (!sheet) return { count: 0 };
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return { count: 0 };
+
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(h => String(h).trim().toLowerCase().replace(/\s/g,''));
+  const tsIdx = headers.indexOf('timestamp');
+  if (tsIdx < 0) return { count: 0 };
+
+  const timestampVals = sheet.getRange(2, tsIdx + 1, lastRow - 1, 1).getValues();
+  const tz = getSetting_('TIMEZONE') || SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone() || Session.getScriptTimeZone();
+  const todayKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+
+  let count = 0;
+  for (let i = 0; i < timestampVals.length; i++) {
+    const raw = timestampVals[i][0];
+    if (!raw) continue;
+    const d = raw instanceof Date ? raw : new Date(raw);
+    if (isNaN(d.getTime())) continue;
+    const rowDay = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+    if (rowDay === todayKey) count++;
+  }
+
+  const result = { count };
+  cachePut_(CACHE_KEY_TODAY, result);
+  return result;
+}
+
+
 // ─── EMAIL FUNCTIONS ─────────────────────────────────────────
 
 function sendMorningDueNowReminder() {
   const data     = api_getDuePeople();
   const appUrl   = 'https://pikcalltracker.netlify.app/';
   const emails   = getSetting_('REMINDER_EMAIL');
+  const notifRaw = String(getSetting_('NOTIFICATIONS_ENABLED') || 'true').trim().toLowerCase();
+  const notificationsOn = !(notifRaw === 'false' || notifRaw === '0' || notifRaw === 'off' || notifRaw === 'no');
   const userName = getSetting_('YOUR_NAME') || 'Pastor';
-  if (!emails) return;
+  if (!notificationsOn || !emails || emails === 'true' || emails === 'false') return;
 
   function safe_(v) {
     return String(v == null ? '' : v)
@@ -775,7 +897,40 @@ function sendMorningDueNowReminder() {
     </div>`;
   }
 
-  const totalDue = (data.callbacks||[]).length + (data.overdue||[]).length + (data.today||[]).length;
+  function dueTodayTodos_() {
+    try {
+      const tz = getSetting_('TIMEZONE') || SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone() || Session.getScriptTimeZone();
+      const todayKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+      const res = api_getTodos('');
+      const todos = (res && Array.isArray(res.todos)) ? res.todos : [];
+      return todos.filter(t => {
+        if (!t || t.done) return false;
+        const raw = t.dueDateIso || t.dueDate;
+        if (!raw) return false;
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return false;
+        return Utilities.formatDate(d, tz, 'yyyy-MM-dd') === todayKey;
+      });
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function todoSection_(todos) {
+    if (!todos || !todos.length) return '';
+    return `<div style="margin-bottom:22px;">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;color:#7a5a00;margin-bottom:10px;">Tasks Due Today (${todos.length})</div>
+      ${todos.map(function(t){
+        return `<div style="border:1px solid #eee0b8;background:#faf5e8;border-radius:16px;padding:14px 16px;margin-bottom:10px;">
+          <div style="font-size:15px;font-weight:700;color:#1a1a18;margin-bottom:4px;">${safe_(t.personName || 'My Task')}</div>
+          <div style="font-size:13px;color:#5f5d57;line-height:1.6;">${safe_(t.text || '')}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  const dueTodos = dueTodayTodos_();
+  const totalDue = (data.callbacks||[]).length + (data.overdue||[]).length + (data.today||[]).length + dueTodos.length;
 
   const html = `
     <div style="margin:0;padding:24px 0;background:#f4f1eb;font-family:Arial,Helvetica,sans-serif;color:#1a1a18;">
@@ -797,6 +952,7 @@ function sendMorningDueNowReminder() {
           ${section_('🟠 Overdue','#b42318',data.overdue||[],'overdue')}
           ${section_('🟡 Due Today','#b89146',data.today||[],'today')}
           ${totalDue===0?'<p style="font-size:14px;color:#027a48;margin:8px 0 18px;">✅ All caught up. Nothing due today.</p>':''}
+          ${todoSection_(dueTodos)}
           <div style="text-align:center;margin:22px 0 8px;"><a href="${appUrl}" style="display:inline-block;background:#244c43;color:#fff;text-decoration:none;padding:14px 28px;border-radius:12px;font-weight:700;font-size:14px;">Open Dashboard</a></div>
           <div style="text-align:center;font-size:13px;color:#7a7870;margin-top:10px;">Start with callbacks, then overdue, then due today.</div>
         </td></tr>
@@ -811,8 +967,10 @@ function sendMondayFollowupsThisWeek() {
   const data     = api_getDuePeople();
   const appUrl   = 'https://pikcalltracker.netlify.app/';
   const emails   = getSetting_('REMINDER_EMAIL');
+  const notifRaw = String(getSetting_('NOTIFICATIONS_ENABLED') || 'true').trim().toLowerCase();
+  const notificationsOn = !(notifRaw === 'false' || notifRaw === '0' || notifRaw === 'off' || notifRaw === 'no');
   const userName = getSetting_('YOUR_NAME') || 'Pastor';
-  if (!emails) return;
+  if (!notificationsOn || !emails || emails === 'true' || emails === 'false') return;
 
   function safe_(v) {
     return String(v == null ? '' : v)
@@ -1248,6 +1406,139 @@ function api_savePersonNotes(personId, notes) {
 }
 
 
+
+// ─── API: TODOS ──────────────────────────────────────────────
+
+function api_getTodos(personId) {
+  try {
+    const cached = cacheGet_(CACHE_KEY_TODOS_ALL);
+    if (cached && Array.isArray(cached.todos)) {
+      const filtered = personId
+        ? cached.todos.filter(t => String(t.personId) === String(personId))
+        : cached.todos;
+      return { todos: filtered };
+    }
+
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_TODOS);
+    if (!sheet || sheet.getLastRow() < 2) return { todos: [] };
+    ensureTodoDueDateColumn_(sheet);
+
+    const data    = getSheetValues_(sheet);
+    if (!data.length || !data[0] || !data[0].length) return { todos: [] };
+    const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const idx     = h => headers.indexOf(h);
+
+    const todos = [];
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (personId && String(row[idx('personid')]) !== String(personId)) continue;
+      todos.push({
+        id:            String(row[idx('todoid')]        || ''),
+        createdAt:     row[idx('createdat')] ? formatDate_(row[idx('createdat')]) : '',
+        personId:      String(row[idx('personid')]      || ''),
+        personName:    String(row[idx('personname')]    || ''),
+        interactionId: String(row[idx('interactionid')] || ''),
+        text:          String(row[idx('text')]          || ''),
+        dueDate:       (idx('duedate') >= 0 && row[idx('duedate')]) ? formatDate_(row[idx('duedate')]) : '',
+        dueDateIso:    (idx('duedate') >= 0 && row[idx('duedate')]) ? Utilities.formatDate(new Date(row[idx('duedate')]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
+        done:          row[idx('done')] === true || String(row[idx('done')]).toUpperCase() === 'TRUE',
+        completedAt:   row[idx('completedat')] ? formatDate_(row[idx('completedat')]) : '',
+        _dueRaw:       (idx('duedate') >= 0 ? row[idx('duedate')] : ''),
+        _createdRaw:   row[idx('createdat')] || ''
+      });
+    }
+
+    // Open todos first, then done; within each group newest first
+    todos.sort((a, b) => {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      const ad = a._dueRaw ? new Date(a._dueRaw).getTime() : Number.MAX_SAFE_INTEGER;
+      const bd = b._dueRaw ? new Date(b._dueRaw).getTime() : Number.MAX_SAFE_INTEGER;
+      if (ad !== bd) return ad - bd; // earlier due first
+      return new Date(b._createdRaw || 0).getTime() - new Date(a._createdRaw || 0).getTime();
+    });
+
+    todos.forEach(t => { delete t._createdRaw; delete t._dueRaw; });
+    cachePut_(CACHE_KEY_TODOS_ALL, { todos: todos });
+
+    if (personId) {
+      return { todos: todos.filter(t => String(t.personId) === String(personId)) };
+    }
+    return { todos };
+  } catch(e) {
+    return { todos: [], error: e.message };
+  }
+}
+
+function api_saveTodos(payload) {
+  try {
+    const { interactionId, personId, personName, todos } = payload;
+    if (!personId || !Array.isArray(todos) || !todos.length) return { success: false, error: 'Missing fields.' };
+
+    const ss    = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet   = ss.getSheetByName(SHEET_TODOS);
+    if (!sheet) {
+      sheet = ss.insertSheet(SHEET_TODOS);
+      sheet.getRange(1,1,1,9).setValues([['TodoID','CreatedAt','PersonID','PersonName','InteractionID','Text','DueDate','Done','CompletedAt']])
+        .setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
+    }
+    ensureTodoDueDateColumn_(sheet);
+
+    const now = new Date();
+    todos.forEach((t, i) => {
+      const text = String(t.text || '').trim();
+      if (!text) return;
+      const dueDate = parseDueDate_(t.dueDate);
+      sheet.appendRow([
+        'TD' + now.getTime() + '_' + i,
+        now,
+        personId,
+        personName || '',
+        interactionId || '',
+        text,
+        dueDate || '',
+        false,
+        ''
+      ]);
+    });
+
+    cacheBust_();
+    return { success: true, saved: todos.length };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+}
+
+function api_updateTodo(todoId, done) {
+  try {
+    if (!todoId) return { success: false, error: 'Missing todoId.' };
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_TODOS);
+    if (!sheet) return { success: false, error: 'TODOS sheet not found.' };
+    if (sheet.getLastRow() < 2) return { success: false, error: 'Todo not found.' };
+    ensureTodoDueDateColumn_(sheet);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+      .map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const hMap = headerMap_(headers);
+    const idx  = h => hMap[h];
+    const isDone  = done === 'true';
+    if (idx('todoid') < 0 || idx('done') < 0 || idx('completedat') < 0) {
+      return { success: false, error: 'TODOS headers are invalid.' };
+    }
+    const idCol = idx('todoid') + 1;
+    const found = sheet.getRange(2, idCol, sheet.getLastRow() - 1, 1)
+      .createTextFinder(String(todoId))
+      .matchEntireCell(true)
+      .findNext();
+    if (!found) return { success: false, error: 'Todo not found.' };
+    const row = found.getRow();
+    sheet.getRange(row, idx('done') + 1).setValue(isDone);
+    sheet.getRange(row, idx('completedat') + 1).setValue(isDone ? new Date() : '');
+    cacheBust_();
+    return { success: true };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+}
+
 // ─── MENU ────────────────────────────────────────────────────
 
 function onOpen() {
@@ -1289,4 +1580,166 @@ function debugDuePeople() {
   }
 
   Logger.log(JSON.stringify(computeDuePeople_(), null, 2));
+}
+
+function api_updateTodoText(todoId, text) {
+  try {
+    if (!todoId) return { success: false, error: 'Missing todoId.' };
+    const nextText = String(text || '').trim();
+    if (!nextText) return { success: false, error: 'Task text cannot be empty.' };
+
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_TODOS);
+    if (!sheet) return { success: false, error: 'TODOS sheet not found.' };
+    if (sheet.getLastRow() < 2) return { success: false, error: 'Todo not found.' };
+    ensureTodoDueDateColumn_(sheet);
+
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+      .map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const hMap = headerMap_(headers);
+    const idIdx = hMap['todoid'];
+    const textIdx = hMap['text'];
+    if (idIdx < 0 || textIdx < 0) return { success: false, error: 'TODOS headers are invalid.' };
+    const found = sheet.getRange(2, idIdx + 1, sheet.getLastRow() - 1, 1)
+      .createTextFinder(String(todoId))
+      .matchEntireCell(true)
+      .findNext();
+    if (!found) return { success: false, error: 'Todo not found.' };
+    sheet.getRange(found.getRow(), textIdx + 1).setValue(nextText);
+    cacheBust_();
+    return { success: true };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+}
+
+function api_deleteTodo(todoId) {
+  try {
+    if (!todoId) return { success: false, error: 'Missing todoId.' };
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_TODOS);
+    if (!sheet) return { success: false, error: 'TODOS sheet not found.' };
+    if (sheet.getLastRow() < 2) return { success: false, error: 'Todo not found.' };
+    ensureTodoDueDateColumn_(sheet);
+
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+      .map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const hMap = headerMap_(headers);
+    const idIdx = hMap['todoid'];
+    if (idIdx < 0) return { success: false, error: 'TODOS headers are invalid.' };
+    const found = sheet.getRange(2, idIdx + 1, sheet.getLastRow() - 1, 1)
+      .createTextFinder(String(todoId))
+      .matchEntireCell(true)
+      .findNext();
+    if (!found) return { success: false, error: 'Todo not found.' };
+    sheet.deleteRow(found.getRow());
+    cacheBust_();
+    return { success: true };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+}
+
+function api_updateTodoDueDate(todoId, dueDate) {
+  try {
+    if (!todoId) return { success: false, error: 'Missing todoId.' };
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_TODOS);
+    if (!sheet) return { success: false, error: 'TODOS sheet not found.' };
+    if (sheet.getLastRow() < 2) return { success: false, error: 'Todo not found.' };
+    ensureTodoDueDateColumn_(sheet);
+
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+      .map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const hMap = headerMap_(headers);
+    const idIdx = hMap['todoid'];
+    const dueIdx = hMap['duedate'];
+    if (idIdx < 0 || dueIdx < 0) return { success: false, error: 'TODOS headers are invalid.' };
+
+    const found = sheet.getRange(2, idIdx + 1, sheet.getLastRow() - 1, 1)
+      .createTextFinder(String(todoId))
+      .matchEntireCell(true)
+      .findNext();
+    if (!found) return { success: false, error: 'Todo not found.' };
+
+    const parsed = parseDueDate_(dueDate);
+    sheet.getRange(found.getRow(), dueIdx + 1).setValue(parsed || '');
+    cacheBust_();
+    return { success: true };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+}
+
+function ensureSettingKey_(sheet, key, defaultVal) {
+  if (!sheet || !key) return;
+  const data = sheet.getDataRange().getValues();
+  for (let i = 0; i < data.length; i++) {
+    if (String(data[i][0] || '').trim().toUpperCase() === String(key).trim().toUpperCase()) return;
+  }
+  sheet.appendRow([key, defaultVal == null ? '' : defaultVal]);
+}
+
+function api_updateTodoAssignee(todoId, personId, personName) {
+  try {
+    if (!todoId) return { success: false, error: 'Missing todoId.' };
+    if (!personId) return { success: false, error: 'Missing personId.' };
+
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_TODOS);
+    if (!sheet) return { success: false, error: 'TODOS sheet not found.' };
+    if (sheet.getLastRow() < 2) return { success: false, error: 'Todo not found.' };
+    ensureTodoDueDateColumn_(sheet);
+
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+      .map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const hMap = headerMap_(headers);
+    const idIdx = hMap['todoid'];
+    const pidIdx = hMap['personid'];
+    const pnameIdx = hMap['personname'];
+    if (idIdx < 0 || pidIdx < 0 || pnameIdx < 0) {
+      return { success: false, error: 'TODOS headers are invalid.' };
+    }
+
+    const found = sheet.getRange(2, idIdx + 1, sheet.getLastRow() - 1, 1)
+      .createTextFinder(String(todoId))
+      .matchEntireCell(true)
+      .findNext();
+    if (!found) return { success: false, error: 'Todo not found.' };
+
+    const row = found.getRow();
+    const nextName = String(personName || '').trim();
+    sheet.getRange(row, pidIdx + 1).setValue(String(personId));
+    sheet.getRange(row, pnameIdx + 1).setValue(nextName || 'My Tasks');
+    cacheBust_();
+    return { success: true };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+}
+
+function ensureTodoDueDateColumn_(sheet) {
+  const sh = sheet || SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_TODOS);
+  if (!sh) return false;
+  const headerRow = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
+    .map(h => String(h).trim());
+  const normalized = headerRow.map(h => h.toLowerCase().replace(/\s/g,''));
+  if (normalized.indexOf('duedate') >= 0) return true;
+
+  const donePos = normalized.indexOf('done');
+  if (donePos >= 0) {
+    sh.insertColumnBefore(donePos + 1);
+    sh.getRange(1, donePos + 1).setValue('DueDate')
+      .setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
+  } else {
+    const newCol = sh.getLastColumn() + 1;
+    sh.getRange(1, newCol).setValue('DueDate')
+      .setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
+  }
+  return true;
+}
+
+function parseDueDate_(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return '';
+  d.setHours(0, 0, 0, 0);
+  return d;
 }

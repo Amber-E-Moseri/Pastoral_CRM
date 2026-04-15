@@ -1,6 +1,6 @@
-
+﻿
   var API = 'https://script.google.com/macros/s/AKfycbxIyopzk2Lg2joe_7AWLJhofkEKy4k8sDQBOJ9OtxYhQW7sh98nCuLWLMblpmh7ogC6/exec';
-  // ── Hash-based routing ───────────────────────────────────
+  // â”€â”€ Hash-based routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   var HASH_MAP = {
     'home':        'pg-home',
     'dashboard':   'pg-dash',
@@ -219,9 +219,20 @@
 
   function loadDash() {
     showDashLoading();
-    apiFetch('duePeople').then(renderDash).catch(function(e){
-      document.getElementById('dash-body').innerHTML = '<div class="err-box">Could not load data. Try refreshing.<br><small>' + esc(String(e)) + '</small></div>';
-    });
+    Promise.all([apiFetch('duePeople'), apiFetch('getTodayCount')])
+      .then(function(res){
+        var due = res[0] || {};
+        var today = res[1] || {};
+        renderDash(due);
+        var el = document.getElementById('dash-today-count');
+        if (el) {
+          var n = Number(today.count) || 0;
+          el.textContent = n + (n === 1 ? ' call logged today' : ' calls logged today');
+        }
+      })
+      .catch(function(e){
+        document.getElementById('dash-body').innerHTML = '<div class="err-box">Could not load data. Try refreshing.<br><small>' + esc(String(e)) + '</small></div>';
+      });
   }
 
   function jumpTo(id){ var el = document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth', block:'start'}); }
@@ -454,7 +465,7 @@
   function pickAction(btn) {
     document.querySelectorAll('.ac').forEach(function(c){ c.className = 'ac'; });
     selAction = btn.dataset.a;
-    btn.className = 'ac ' + (selAction === 'None' ? 'a-none' : 'a-sel');
+    btn.className = 'ac ' + (selAction === 'None' ? 'a-none a-sel' : 'a-sel');
     var dw = document.getElementById('dateWrap');
     if (selAction === 'Callback' || selAction === 'Follow-up') dw.classList.add('on');
     else { dw.classList.remove('on'); document.getElementById('next-dt').value = ''; }
@@ -470,7 +481,7 @@
     saving = v;
     var b = document.getElementById('save-btn');
     b.disabled = v;
-    b.textContent = v ? 'Saving…' : 'Save Call';
+    b.textContent = v ? 'Saving...' : 'Save Call';
   }
 
   function _origSaveCall() {
@@ -486,17 +497,19 @@
     var payload = { personId:pid, fullName:name, result:selResult, nextAction:selAction, summary:sum, nextActionDateTime:ndt || null };
     var sig = JSON.stringify(payload);
     if (sig === lastSig && (Date.now() - lastAt) < 15000) { showMsg('This call was just saved - tap "Log another call" to continue.', 'info'); return; }
-    setSaving(true); showMsg('Saving…', 'info');
+    setSaving(true); showMsg('Saving...', 'info');
     apiFetch('saveInteraction', { payload: JSON.stringify(payload) })
       .then(function(res){
         setSaving(false);
         if (res && res.success) {
           lastSig = sig; lastAt = Date.now();
-          // Save action items if any
+          // Capture pending action item text, then save action items if any
+          if (window.flushPendingLogTodoItem) window.flushPendingLogTodoItem();
           var todoItems = (window.getTodoItems ? window.getTodoItems() : []);
-          if (todoItems.length && res.interactionId) {
+          if (todoItems.length) {
+            var interactionId = (res && (res.interactionId || res.interactionID || res.id)) || ('manual-' + Date.now());
             apiFetch('saveTodos', { payload: JSON.stringify({
-              interactionId: res.interactionId,
+              interactionId: interactionId,
               personId: pid,
               personName: name,
               todos: todoItems.map(function(t){
@@ -532,7 +545,7 @@
     document.getElementById('person-search').style.display = '';
     document.querySelectorAll('.chip').forEach(function(c){ c.className = 'chip'; });
     document.querySelectorAll('.ac').forEach(function(c){ c.className = 'ac'; });
-    document.querySelector('[data-a="None"]').className = 'ac a-none';
+    document.querySelector('[data-a="None"]').className = 'ac a-none a-sel';
     document.getElementById('next-dt').value = '';
     document.getElementById('dateWrap').classList.remove('on');
     document.getElementById('summary').value = '';
@@ -548,7 +561,7 @@
     if (ri) ri.style.display = 'none';
   }
 
-  // ── History page ──────────────────────────────────────────
+  // â”€â”€ History page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   var histActivePid = null;
   var histPreselPid = null;
 
@@ -621,14 +634,16 @@
     renderHistPeopleList(q ? allPeople.filter(function(p){ return p.name.toLowerCase().indexOf(q) >= 0; }) : allPeople);
   }
 
-  function renderHistInline(pid, name) {
+    function renderHistInline(pid, name) {
     var panel = document.getElementById('hinline-' + pid);
     if (!panel) return;
     panel.style.display = 'block';
-    panel.innerHTML = '<div class="hist-inline-empty">Loading…</div>';
+    panel.innerHTML = '<div class="hist-inline-empty">Loading...</div>';
     apiFetch('getInteractions', { personId: pid }).then(function(list) {
-      var h = '<div style="padding:10px 14px 0;display:flex;gap:8px;">' +
-        '<button class="tb-btn" style="background:var(--accent);border-radius:7px;padding:6px 12px;font-size:16px;" onclick="goLogPerson(\'' + esc(pid) + '\',\'' + esc(name) + '\')">📞</button>' +
+      var h = '<div class="hist-inline-topbar">' +
+        '<button class="hist-inline-log-btn" onclick="goLogPerson(\'' + esc(pid) + '\',\'' + esc(name) + '\')" title="Log call for ' + esc(name) + '" aria-label="Log call for ' + esc(name) + '">' +
+          '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8a15.7 15.7 0 0 0 6.6 6.6l2.2-2.2c.3-.3.8-.4 1.2-.3 1 .3 2 .5 3 .5.7 0 1.2.5 1.2 1.2V20c0 .7-.5 1.2-1.2 1.2C10.9 21.2 2.8 13.1 2.8 3.2 2.8 2.5 3.3 2 4 2h3.4c.7 0 1.2.5 1.2 1.2 0 1 .2 2 .5 3 .1.4 0 .9-.3 1.2l-2.2 2.4z"></path></svg>' +
+        '</button>' +
         '</div>';
       if (!Array.isArray(list) || !list.length) {
         h += '<div class="hist-inline-empty">No call history yet.</div>';
@@ -651,8 +666,7 @@
       panel.innerHTML = '<div class="hist-inline-empty">Could not load history.</div>';
     });
   }
-
-  function renderHistory(list, personName) {
+function renderHistory(list, personName) {
     var el = document.getElementById('hist-results');
     if (!Array.isArray(list) || !list.length) {
       el.innerHTML = '<div class="hist-empty">No call history found for this person.</div>';
@@ -679,7 +693,7 @@
     el.innerHTML = h;
   }
 
-  // ── Settings pages ───────────────────────────────────────
+  // â”€â”€ Settings pages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   var cadPeople = [];
   var cadSessionLoaded = false;
   var cadSessionDirty  = false;
@@ -700,24 +714,43 @@
     apiFetch('getSettings').then(function(list) {
       if (!Array.isArray(list) || !list.length) { el.innerHTML = '<div class="hist-empty">No settings found.</div>'; return; }
       var SETTING_ICONS = {
-        'REMINDER_EMAIL':        '📧',
-        'MORNING_REMINDER_HOUR': '🌅',
-        'DUESTATUS_REFRESH_HOUR':'🔄',
-        'MONDAY_FOLLOWUPS_HOUR': '📋',
-        'TIMEZONE':              '🌍',
-        'YOUR_NAME':             '👤'
+        'NOTIFICATIONS_ENABLED': '[Notify]',
+        'REMINDER_EMAIL':        '[Mail]',
+        'MORNING_REMINDER_HOUR': '[Morning]',
+        'DUESTATUS_REFRESH_HOUR':'[Refresh]',
+        'MONDAY_FOLLOWUPS_HOUR': '[Weekly]',
+        'TIMEZONE':              '[TZ]',
+        'YOUR_NAME':             '[Name]'
       };
       el.innerHTML = list.map(function(s) {
         var k    = esc(s.key);
-        var icon = SETTING_ICONS[s.key] || '⚙️';
+        var icon = SETTING_ICONS[s.key] || '[Setting]';
+        var ctrlHtml = '';
+        if (s.key === 'NOTIFICATIONS_ENABLED') {
+          var raw = String(s.val == null ? '' : s.val).trim().toLowerCase();
+          var isOn = raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
+          ctrlHtml =
+            '<div class="aset-row-ctrl aset-row-ctrl-bool">' +
+              '<input type="hidden" class="aset-input" id="aset-' + k + '" value="' + (isOn ? 'true' : 'false') + '">' +
+              '<div class="aset-toggle" id="aset-toggle-' + k + '">' +
+                '<button type="button" class="aset-toggle-btn' + (isOn ? ' active' : '') + '" onclick="asetPickBool(\'' + k + '\',true)">On</button>' +
+                '<button type="button" class="aset-toggle-btn' + (!isOn ? ' active' : '') + '" onclick="asetPickBool(\'' + k + '\',false)">Off</button>' +
+              '</div>' +
+              '<button class="aset-save" id="assave-' + k + '" onclick="saveAppSetting(\'' + k + '\')">Save</button>' +
+              '<span class="aset-status" id="asstat-' + k + '"></span>' +
+            '</div>';
+        } else {
+          ctrlHtml =
+            '<div class="aset-row-ctrl">' +
+              '<input class="aset-input" id="aset-' + k + '" value="' + esc(s.val) + '" placeholder="-">' +
+              '<button class="aset-save" id="assave-' + k + '" onclick="saveAppSetting(\'' + k + '\')">Save</button>' +
+              '<span class="aset-status" id="asstat-' + k + '"></span>' +
+            '</div>';
+        }
         return '<div class="aset-row">' +
           '<div class="aset-label">' + icon + ' ' + esc(s.label || s.key) + '</div>' +
           (s.desc ? '<div class="aset-desc">' + esc(s.desc) + '</div>' : '') +
-          '<div class="aset-row-ctrl">' +
-            '<input class="aset-input" id="aset-' + k + '" value="' + esc(s.val) + '" placeholder="-">' +
-            '<button class="aset-save" id="assave-' + k + '" onclick="saveAppSetting(\'' + k + '\')">Save</button>' +
-            '<span class="aset-status" id="asstat-' + k + '"></span>' +
-          '</div>' +
+          ctrlHtml +
         '</div>';
       }).join('');
     }).catch(function(e) {
@@ -745,14 +778,14 @@
     if (!inp) return;
     var val = inp.value.trim();
     if (!val) { if (stat) { stat.textContent = "Please enter a name."; stat.style.color = "var(--danger)"; } return; }
-    btn.disabled = true; btn.textContent = "…";
+    btn.disabled = true; btn.textContent = "...";
     apiFetch("saveSetting", { key: "YOUR_NAME", val: val }).then(function(res) {
       btn.disabled = false; btn.textContent = "Save";
       if (res && res.success) {
         window._userName = val;
         var greetEl = document.getElementById("home-greeting");
         if (greetEl) { var h = new Date().getHours(); var gr = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; greetEl.textContent = gr + ", " + val + "."; }
-        if (stat) { stat.textContent = "✓ Saved!"; stat.style.color = "var(--success)"; setTimeout(function(){ stat.textContent = ""; }, 2500); }
+        if (stat) { stat.textContent = "Saved!"; stat.style.color = "var(--success)"; setTimeout(function(){ stat.textContent = ""; }, 2500); }
       } else {
         if (stat) { stat.textContent = "Error saving."; stat.style.color = "var(--danger)"; }
       }
@@ -768,7 +801,7 @@
     var stat = document.getElementById('asstat-' + key);
     if (!inp || !btn) return;
     var val = inp.value;
-    btn.disabled = true; btn.textContent = '…';
+    btn.disabled = true; btn.textContent = '...';
     apiFetch('saveSetting', { key: key, val: val }).then(function(res) {
       btn.disabled = false; btn.textContent = 'Save';
       if (res && res.success) {
@@ -782,7 +815,7 @@
             greetEl.textContent = window._userName ? gr + ', ' + window._userName + '.' : gr + '.';
           }
         }
-        if (stat) { stat.textContent = '✓'; stat.className = 'aset-status ok'; setTimeout(function(){ stat.textContent = ''; }, 2000); }
+        if (stat) { stat.textContent = 'OK'; stat.className = 'aset-status ok'; setTimeout(function(){ stat.textContent = ''; }, 2000); }
       } else {
         if (stat) { stat.textContent = '!'; stat.className = 'aset-status err'; }
       }
@@ -790,6 +823,17 @@
       btn.disabled = false; btn.textContent = 'Save';
       if (stat) { stat.textContent = '!'; stat.className = 'aset-status err'; }
     });
+  }
+
+  function asetPickBool(key, isOn) {
+    var inp = document.getElementById('aset-' + key);
+    var wrap = document.getElementById('aset-toggle-' + key);
+    if (inp) inp.value = isOn ? 'true' : 'false';
+    if (wrap) {
+      var buttons = wrap.querySelectorAll('.aset-toggle-btn');
+      if (buttons[0]) buttons[0].classList.toggle('active', !!isOn);
+      if (buttons[1]) buttons[1].classList.toggle('active', !isOn);
+    }
   }
 
   function loadCadencePeople() {
@@ -844,7 +888,7 @@
           '<span class="cad-days-label">days</span>' +
           '<button class="cad-save" id="csave-' + pid + '" onclick="saveCad(\'' + pid + '\')">Save</button>' +
           '<span class="cad-status" id="cstat-' + pid + '"></span>' +
-          '<button class="cad-edit" onclick="openEditModal(\'' + pid + '\')" title="Edit" style="margin-left:auto;">✎</button>' +
+          '<button class="cad-edit" onclick="openEditModal(\'' + pid + '\')" title="Edit" style="margin-left:auto;">Edit</button>' +
         '</div>' +
       '</div>';
     }).join('');
@@ -859,7 +903,7 @@
     if (!days || days < 1) { inp.style.borderColor = 'var(--danger)'; return; }
     inp.style.borderColor = '';
     btn.disabled = true;
-    btn.textContent = '…';
+    btn.textContent = '...';
     apiFetch('saveCadence', { personId: pid, cadenceDays: days })
       .then(function(res) {
         btn.disabled = false;
@@ -868,7 +912,7 @@
           var p = cadPeople.find(function(x){ return String(x.id) === String(pid); });
           if (p) p.cadenceDays = days;
           cadSessionDirty = true;
-          if (stat) { stat.textContent = '✓'; stat.className = 'cad-status ok'; setTimeout(function(){ stat.textContent = ''; }, 2000); }
+          if (stat) { stat.textContent = 'OK'; stat.className = 'cad-status ok'; setTimeout(function(){ stat.textContent = ''; }, 2000); }
         } else {
           if (stat) { stat.textContent = '!'; stat.className = 'cad-status err'; }
         }
@@ -895,7 +939,7 @@
           if (p) p.active = newActive;
           cadSessionDirty = true;
           if (lbl) { lbl.textContent = newActive ? 'Active' : 'Inactive'; lbl.className = 'sw-label ' + (newActive ? 'on' : 'off'); }
-          if (stat) { stat.textContent = '✓'; stat.className = 'cad-status ok'; setTimeout(function(){ stat.textContent = ''; }, 2000); }
+          if (stat) { stat.textContent = 'OK'; stat.className = 'cad-status ok'; setTimeout(function(){ stat.textContent = ''; }, 2000); }
         } else {
           chk.checked = !newActive;
           if (lbl) { lbl.textContent = !newActive ? 'Active' : 'Inactive'; lbl.className = 'sw-label ' + (!newActive ? 'on' : 'off'); }
@@ -910,7 +954,7 @@
       });
   }
 
-    // ── Add Person page ──────────────────────────────────────
+    // â”€â”€ Add Person page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   var addPersonSaving = false;
 
   function initAddPersonPage() {
@@ -986,7 +1030,7 @@
     showPage(pageId, false);
   };
 
-  // ── Analytics ─────────────────────────────────────────────
+  // â”€â”€ Analytics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   var analyticsData = null;
   var analyticsRange = '3m'; // '1m' or '3m'
   var roleFreqData = null;
@@ -1024,7 +1068,7 @@
     var silent = data.silentPeople  || [];
     var el     = document.getElementById('analytics-body');
 
-    // ── Range filter ──
+    // â”€â”€ Range filter â”€â”€
     var numWeeks = analyticsRange === '1m' ? 4 : 12;
     var filtered = wks.slice(-numWeeks);
 
@@ -1033,13 +1077,13 @@
     var filtReached  = filtered.reduce(function(s,w){ return s + w.reached; }, 0);
     var filtRate     = filtTotal > 0 ? Math.round(filtReached / filtTotal * 100) : 0;
 
-    // ── This week stats ──
+    // â”€â”€ This week stats â”€â”€
     var thisWkTotal     = s.thisWeekTotal      || 0;
     var thisWkDue       = s.thisWeekDue        || 0;
     var thisWkReached   = s.thisWeekDueReached || 0;
     var thisWkCompleted = s.completedThisWeek  || 0;
 
-    // ── Summary stat boxes ──
+    // â”€â”€ Summary stat boxes â”€â”€
     var statsHtml =
       '<div class="an-stat-row">' +
         '<div class="an-stat-box">' +
@@ -1056,29 +1100,29 @@
 
     var lastWeekHtml = ''; // removed per spec
 
-    // ── Range toggle ──
+    // â”€â”€ Range toggle â”€â”€
     var toggleHtml =
       '<div class="an-range-toggle">' +
         '<button class="an-range-btn' + (analyticsRange === '1m' ? ' active' : '') + '" onclick="setAnalyticsRange(\'1m\')">Last Month</button>' +
         '<button class="an-range-btn' + (analyticsRange === '3m' ? ' active' : '') + '" onclick="setAnalyticsRange(\'3m\')">Last 3 Months</button>' +
       '</div>';
 
-    // ── Line chart ──
+    // â”€â”€ Line chart â”€â”€
     var chartHtml = buildLineChart(filtered, analyticsRange);
 
-    // ── Best week callout ──
+    // â”€â”€ Best week callout â”€â”€
     var bestInRange = filtered.reduce(function(b, w){ return w.reached > b.reached ? w : b; }, filtered[0] || {});
     var bestHtml = bestInRange && bestInRange.reached > 0
       ? '<div style="background:var(--accent-soft);border:1px solid rgba(36,76,67,.15);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:20px;font-size:13px;color:var(--accent);">' +
-          '🏆 <strong>Best week (reached):</strong> w/c ' + esc(bestInRange.label) + ' - ' + bestInRange.reached + ' person' + (bestInRange.reached !== 1 ? 's' : '') + ' reached' +
+          '<strong>Best week (reached):</strong> w/c ' + esc(bestInRange.label) + ' - ' + bestInRange.reached + ' person' + (bestInRange.reached !== 1 ? 's' : '') + ' reached' +
         '</div>'
       : '';
 
-    // ── Silent people ──
+    // â”€â”€ Silent people â”€â”€
     var silentHtml = '';
     if (silent.length) {
       silentHtml += '<div class="an-chart-card" style="border-left:3px solid var(--danger);">';
-      silentHtml += '<div class="an-chart-title" style="color:var(--danger);">⚠ No Contact in 6+ Weeks <span style="font-weight:400;font-size:12px;color:var(--muted);">(' + silent.length + ' ' + (silent.length === 1 ? 'person' : 'people') + ')</span></div>';
+      silentHtml += '<div class="an-chart-title" style="color:var(--danger);">No Contact in 6+ Weeks <span style="font-weight:400;font-size:12px;color:var(--muted);">(' + silent.length + ' ' + (silent.length === 1 ? 'person' : 'people') + ')</span></div>';
       silent.forEach(function(p) {
         var sub = p.lastContact
           ? 'Last contact: ' + esc(p.lastContact) + (p.weeksSince ? ' (' + p.weeksSince + ' weeks ago)' : '')
@@ -1092,7 +1136,7 @@
       });
       silentHtml += '</div>';
     } else {
-      silentHtml = '<div style="background:var(--success-bg);border:1px solid rgba(2,122,72,.15);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:20px;font-size:13px;color:var(--success);">✓ Everyone has been contacted in the last 6 weeks.</div>';
+      silentHtml = '<div style="background:var(--success-bg);border:1px solid rgba(2,122,72,.15);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:20px;font-size:13px;color:var(--success);">Everyone has been contacted in the last 6 weeks.</div>';
     }
 
     el.innerHTML = statsHtml + lastWeekHtml + toggleHtml + chartHtml + bestHtml + silentHtml + buildRoleFrequency();
@@ -1103,7 +1147,7 @@
     if (!roles.length) return '';
 
     var rows = roles.map(function(r) {
-      // Colour-code the avg days: green ≤21, gold ≤42, red >42
+      // Colour-code the avg days: green â‰¤21, gold â‰¤42, red >42
       var col = r.avgDays <= 21 ? 'var(--success)' : r.avgDays <= 42 ? 'var(--gold)' : 'var(--danger)';
       var bar = Math.min(100, Math.round(r.avgDays / 60 * 100)); // max bar at 60 days
       return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);">' +
@@ -1201,7 +1245,7 @@
 
     return '<div class="an-line-card">' +
       '<div class="an-line-title">People Reached per Week</div>' +
-      '<div class="an-line-sub">' + (range === '1m' ? 'Last 4 weeks' : 'Last 12 weeks') + ' · ★ best week · ● current week</div>' +
+      '<div class="an-line-sub">' + (range === '1m' ? 'Last 4 weeks' : 'Last 12 weeks') + ' · best week · current week</div>' +
       '<div class="an-line-wrap">' +
         '<svg width="' + svgW + '" height="' + totalH + '" viewBox="0 0 ' + svgW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">' +
           grid +
@@ -1214,7 +1258,7 @@
     '</div>';
   }
 
-  // ── Pull-to-refresh on dashboard ─────────────────────────
+  // â”€â”€ Pull-to-refresh on dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   (function() {
     var startY = 0, pulling = false;
     var dashEl = document.getElementById('pg-dash');
@@ -1234,7 +1278,7 @@
     });
   })();
 
-  // ── Edit Person Modal ─────────────────────────────────────
+  // â”€â”€ Edit Person Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   var editModalPid = null;
 
   function openEditModal(pid) {
@@ -1269,7 +1313,7 @@
     if (!name) { msg.textContent = 'Name is required.'; msg.className = 'modal-msg error'; return; }
 
     btn.disabled = true;
-    btn.textContent = 'Saving…';
+    btn.textContent = 'Saving...';
     msg.className = 'modal-msg';
 
     var payload = JSON.stringify({ personId: editModalPid, name: name, role: role, fellowship: fellowship, priority: priority });
@@ -1300,9 +1344,9 @@
       });
   }
 
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // DARK MODE
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   function toggleDark() {
     var isDark = document.body.classList.toggle('dark');
     try { localStorage.setItem('ct-dark', isDark ? '1' : '0'); } catch(e) {}
@@ -1319,9 +1363,9 @@
     } catch(e) {}
   })();
 
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // QUICK LOG BOTTOM SHEET
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = false, bsSource = 'general';
 
   function openBsheet(pid, name, source) {
@@ -1437,7 +1481,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     };
     bsSaving = true;
     document.getElementById('bsheet-save-btn').disabled = true;
-    bsShowMsg('Saving…', 'info');
+    bsShowMsg('Saving...', 'info');
     stopVoice();
 
     var savePromise;
@@ -1460,7 +1504,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
           }) }).then(function(){ if (window.loadTodos && document.getElementById('pg-todos') && document.getElementById('pg-todos').classList.contains('active')) loadTodos(); }).catch(function(){});
         }
         var todoNote = quickTodos.length ? ' ' + quickTodos.length + ' action item' + (quickTodos.length > 1 ? 's' : '') + ' added.' : '';
-        bsShowMsg((res.offline ? '📶 Saved offline - will sync when back online.' : '✓ Call logged!') + todoNote, 'success');
+        bsShowMsg((res.offline ? 'Saved offline - will sync when back online.' : 'Call logged!') + todoNote, 'success');
         if (bsResult === 'Reached' && bsAction === 'None') optimisticRemoveFromDash(bsPid);
         setTimeout(function() { closeBsheet(); loadDash(); }, 260);
       } else {
@@ -1474,17 +1518,26 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     });
   }
 
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // VOICE TO TEXT
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   var _recognition = null;
   var _activeTextareaId = null;
   var _activeMicBtnId = null;
+  var _voiceErrorShownAt = 0;
+
+  function voiceHint(msg) {
+    var now = Date.now();
+    if (now - _voiceErrorShownAt < 1200) return;
+    _voiceErrorShownAt = now;
+    if (window.showUxToast) window.showUxToast(msg);
+  }
 
   function toggleVoice(textareaId, micBtnId) {
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
       var btn = document.getElementById(micBtnId);
       if (btn) btn.classList.add('no-support');
+      voiceHint('Voice input is not supported here. Try Safari/Chrome or your keyboard mic.');
       return;
     }
     if (_recognition && _activeTextareaId === textareaId) {
@@ -1494,12 +1547,19 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     _activeTextareaId = textareaId;
     _activeMicBtnId = micBtnId;
     var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var ua = navigator.userAgent || '';
+    var isIOS = /iPad|iPhone|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     _recognition = new SpeechRecognition();
-    _recognition.continuous = true;
-    _recognition.interimResults = true;
+    _recognition.continuous = !isIOS;
+    _recognition.interimResults = !isIOS;
     _recognition.lang = 'en-US';
+    _recognition.maxAlternatives = 1;
     var finalTranscript = '';
-    var startVal = document.getElementById(textareaId).value;
+    var ta = document.getElementById(textareaId);
+    if (!ta) { stopVoice(); return; }
+    // On mobile Safari/WebViews, focusing the target first improves start reliability.
+    try { ta.focus({ preventScroll: true }); } catch(e) { try { ta.focus(); } catch(_) {} }
+    var startVal = ta.value;
     if (startVal && !startVal.endsWith(' ')) startVal += ' ';
     _recognition.onstart = function() {
       var btn = document.getElementById(micBtnId);
@@ -1511,16 +1571,28 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
         if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript + ' ';
         else interim += e.results[i][0].transcript;
       }
-      var ta = document.getElementById(textareaId);
-      if (ta) ta.value = startVal + finalTranscript + interim;
+      var ta2 = document.getElementById(textareaId);
+      if (ta2) ta2.value = startVal + finalTranscript + interim;
     };
-    _recognition.onerror = function() { stopVoice(); };
+    _recognition.onerror = function(e) {
+      stopVoice();
+      if (e && e.error === 'not-allowed') voiceHint('Microphone permission denied.');
+      else if (e && e.error === 'service-not-allowed') voiceHint('Speech service is blocked on this browser. Try Safari.');
+      else if (e && e.error === 'audio-capture') voiceHint('No microphone found or mic access is unavailable.');
+      else if (e && e.error === 'no-speech') voiceHint('No speech detected. Try again.');
+      else voiceHint('Voice input unavailable right now.');
+    };
     _recognition.onend = function() {
       var btn = document.getElementById(_activeMicBtnId);
       if (btn) btn.classList.remove('listening');
       _recognition = null;
     };
-    _recognition.start();
+    try {
+      _recognition.start();
+    } catch (e) {
+      stopVoice();
+      voiceHint('Could not start voice input. Try again and allow microphone access.');
+    }
   }
 
   function stopVoice() {
@@ -1536,9 +1608,9 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     _activeMicBtnId = null;
   }
 
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // OFFLINE QUEUE
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   var _offlineQueue = [];
   var _syncing = false;
 
@@ -1598,10 +1670,27 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
         if (idx > 0) loadDash();
         return;
       }
-      var payload = Object.assign({}, queue[idx]);
+      var queued = queue[idx];
+      var payload = Object.assign({}, queued);
+      var queuedTodos = Array.isArray(queued._queuedTodos) ? queued._queuedTodos : [];
       delete payload._queuedAt;
+      delete payload._queuedTodos;
       apiFetch('saveInteraction', { payload: JSON.stringify(payload) })
-        .then(function() { idx++; next(); })
+        .then(function(res) {
+          if (!queuedTodos.length) { idx++; next(); return; }
+          var interactionId = (res && (res.interactionId || res.interactionID || res.id)) || ('offline-' + Date.now());
+          apiFetch('saveTodos', { payload: JSON.stringify({
+            interactionId: interactionId,
+            personId: payload.personId,
+            personName: payload.fullName || '',
+            todos: queuedTodos.map(function(t){
+              if (t && typeof t === 'object') {
+                return { text: String(t.text || ''), dueDate: String(t.dueDate || '') };
+              }
+              return { text: String(t || ''), dueDate: '' };
+            }).filter(function(t){ return String(t.text || '').trim(); })
+          }) }).then(function(){ idx++; next(); }).catch(function(){ idx++; next(); });
+        })
         .catch(function() { _syncing = false; }); // stop on error, retry next time
     }
     next();
@@ -1622,10 +1711,13 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
       var p    = allPeople.find(function(x){ return String(x.id) === String(pid); });
       var name = p ? p.name : (document.getElementById('sel-name').textContent || pid);
       var payload = { personId:pid, fullName:name, result:selResult, nextAction:selAction, summary:sum, nextActionDateTime:ndt||null };
+      if (window.flushPendingLogTodoItem) window.flushPendingLogTodoItem();
+      var todoItems = (window.getTodoItems ? window.getTodoItems() : []);
+      if (todoItems.length) payload._queuedTodos = todoItems;
       queueOfflineCall(payload);
       var sig = JSON.stringify(payload); lastSig = sig; lastAt = Date.now();
       document.getElementById('log-form').style.display = 'none';
-      document.getElementById('success-sub').textContent = '📶 Saved offline - will sync when reconnected.';
+      document.getElementById('success-sub').textContent = 'Saved offline - will sync when reconnected.' + (todoItems.length ? ' ' + todoItems.length + ' action item' + (todoItems.length > 1 ? 's' : '') + ' queued.' : '');
       document.getElementById('success-screen').classList.add('on');
       document.getElementById('save-bar').style.display = 'none';
       return;
@@ -1633,9 +1725,9 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     _origSaveCall();
   }
 
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // PERSON NOTES
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   var _notesPid = null;
 
   function openNotesModal(pid, name) {
@@ -1644,7 +1736,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     document.getElementById('notes-modal-sub').textContent = 'Persistent notes about ' + name;
     document.getElementById('notes-modal-msg').className = 'modal-msg';
     document.getElementById('notes-modal-msg').textContent = '';
-    document.getElementById('notes-modal-ta').value = 'Loading…';
+    document.getElementById('notes-modal-ta').value = 'Loadingâ€¦';
     document.getElementById('notes-modal-ta').disabled = true;
     document.getElementById('notes-save-btn').disabled = true;
     document.getElementById('notes-modal').classList.add('open');
@@ -1671,13 +1763,13 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     var btn = document.getElementById('notes-save-btn');
     var msg = document.getElementById('notes-modal-msg');
     btn.disabled = true;
-    btn.textContent = 'Saving…';
+    btn.textContent = 'Saving...';
     msg.className = 'modal-msg';
     apiFetch('savePersonNotes', { payload: JSON.stringify({ personId: _notesPid, notes: notes }) })
       .then(function(res) {
         btn.disabled = false; btn.textContent = 'Save Notes';
         if (res && res.success) {
-          msg.textContent = '✓ Notes saved.'; msg.className = 'modal-msg ok';
+          msg.textContent = 'âœ“ Notes saved.'; msg.className = 'modal-msg ok';
           setTimeout(function() { msg.className = 'modal-msg'; }, 2500);
         } else {
           msg.textContent = res && res.error ? res.error : 'Save failed.'; msg.className = 'modal-msg error';
@@ -1688,9 +1780,9 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
       });
   }
 
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // SEARCH ACROSS ALL INTERACTIONS
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   var _searchTimer = null;
 
   function onSearchInput() {
@@ -1698,7 +1790,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     var q = document.getElementById('search-page-input').value.trim();
     if (q.length < 2) {
       document.getElementById('search-results-area').innerHTML =
-        '<div class="search-empty"><div style="font-size:32px;margin-bottom:8px;">🔍</div>Search across all call notes, names, and results.</div>';
+        '<div class="search-empty"><div style="font-size:24px;font-weight:700;margin-bottom:8px;">Search</div>Search across all call notes, names, and results.</div>';
       return;
     }
     _searchTimer = setTimeout(doSearch, 400);
@@ -1708,11 +1800,11 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     var q = document.getElementById('search-page-input').value.trim();
     if (q.length < 2) return;
     var area = document.getElementById('search-results-area');
-    area.innerHTML = '<div class="search-empty"><div style="font-size:28px;margin-bottom:8px;">⏳</div>Searching…</div>';
+    area.innerHTML = '<div class="search-empty"><div style="font-size:24px;font-weight:700;margin-bottom:8px;">Search</div>Searching...</div>';
     apiFetch('searchInteractions', { query: q }).then(function(data) {
       var results = data && data.results ? data.results : [];
       if (!results.length) {
-        area.innerHTML = '<div class="search-empty"><div style="font-size:28px;margin-bottom:8px;">😶</div>No results for "<strong>' + esc(q) + '</strong>"</div>';
+        area.innerHTML = '<div class="search-empty"><div style="font-size:24px;font-weight:700;margin-bottom:8px;">Search</div>No results for "<strong>' + esc(q) + '</strong>"</div>';
         return;
       }
       var total = data.total || results.length;
@@ -1744,9 +1836,9 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
 
   // Add search page initialisation handled in showPage above
 
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // AI LOG ASSISTANT
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   var _aiParsed = null;       // holds last parsed result
   var _aiPeopleCache = null;  // local copy of people for override search
 
@@ -1755,7 +1847,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     document.getElementById('ai-input').value = '';
     document.getElementById('ai-input-msg').className = 'msg';
     document.getElementById('ai-parse-btn').disabled = false;
-    document.getElementById('ai-parse-btn').textContent = '✨ Parse';
+    document.getElementById('ai-parse-btn').textContent = '↻ Parse';
     aiShowStep('input');
     document.getElementById('ai-backdrop').classList.add('open');
     document.getElementById('ai-bsheet').classList.add('open');
@@ -1789,10 +1881,10 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     }
     stopVoice();
     var btn = document.getElementById('ai-parse-btn');
-    btn.disabled = true; btn.textContent = '⏳ Parsing…';
+    btn.disabled = true; btn.textContent = '⏳ Parsing...';
     document.getElementById('ai-input-msg').className = 'msg';
 
-    // ── Client-side parsing with chrono-node (no API key needed) ──
+    // â”€â”€ Client-side parsing with chrono-node (no API key needed) â”€â”€
     // Reuse the already-loaded allPeople list if available - avoids a second fetch
     var peoplePromise = (allPeople && allPeople.length)
       ? Promise.resolve(allPeople)
@@ -1804,7 +1896,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
       _aiPeopleCache = people;
       var lower = desc.toLowerCase();
 
-      // ── Result detection ──
+      // â”€â”€ Result detection â”€â”€
       // IMPORTANT: check no-answer negations FIRST to avoid false positives
       // e.g. "called ella, she didn't pick up" must NOT trigger calledAndPattern
       var result = 'No Answer';
@@ -1821,7 +1913,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
         result = 'Rescheduled Call';
       }
 
-      // ── Next action detection ──
+      // â”€â”€ Next action detection â”€â”€
       var nextAction = 'None';
       if (/(call back|call them back|call him back|call her back|ring back|ring them|callback|they.ll call|they will call|will call me|calling me back|she.ll call|he.ll call|will phone|will ring)/.test(lower)) {
         nextAction = 'Callback';
@@ -1829,7 +1921,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
         nextAction = 'Follow-up';
       }
 
-      // ── Date parsing with chrono-node - runs always, not gated on nextAction ──
+      // â”€â”€ Date parsing with chrono-node - runs always, not gated on nextAction â”€â”€
       var nextActionDateTime = null;
       if (typeof chrono !== 'undefined') {
         var parsedDate = chrono.parseDate(desc, new Date(), { forwardDate: true });
@@ -1840,10 +1932,10 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
         }
       }
 
-      // ── Summary: always use the description so notes are never blank ──
+      // â”€â”€ Summary: always use the description so notes are never blank â”€â”€
       var summary = desc;
 
-      // ── Person matching: first name OR full name, case-insensitive ──
+      // â”€â”€ Person matching: first name OR full name, case-insensitive â”€â”€
       var personId = '';
       var personName = '';
       var bestScore = 0;
@@ -1861,10 +1953,10 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
       if (bestScore === 0) { personId = ''; personName = ''; }
 
       _aiParsed = { personId: personId, personName: personName, result: result, nextAction: nextAction, nextActionDateTime: nextActionDateTime, summary: summary };
-      btn.disabled = false; btn.textContent = '✨ Parse';
+      btn.disabled = false; btn.textContent = '↻ Parse';
       showAiConfirm(_aiParsed, people);
     }).catch(function(e) {
-      btn.disabled = false; btn.textContent = '✨ Parse';
+      btn.disabled = false; btn.textContent = '↻ Parse';
       var msg = document.getElementById('ai-input-msg');
       msg.textContent = 'Error: ' + String(e); msg.className = 'msg error';
     });
@@ -1879,11 +1971,11 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     var matchEl = document.getElementById('ai-conf-match');
     var overEl  = document.getElementById('ai-person-override');
     if (parsed.personId) {
-      matchEl.textContent = '✓ Matched in contacts';
+      matchEl.textContent = 'âœ“ Matched in contacts';
       matchEl.style.color = 'var(--success)';
       overEl.style.display = 'none';
     } else {
-      matchEl.textContent = '⚠ Not found in contacts';
+      matchEl.textContent = 'âš  Not found in contacts';
       matchEl.style.color = 'var(--danger)';
       overEl.style.display = 'block';
       document.getElementById('ai-override-search').value = name;
@@ -1927,7 +2019,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
 
     document.getElementById('ai-confirm-msg').className = 'msg';
     document.getElementById('ai-confirm-btn').disabled = false;
-    document.getElementById('ai-confirm-btn').textContent = '✓ Log This Call';
+    document.getElementById('ai-confirm-btn').textContent = 'âœ“ Log This Call';
     aiShowStep('confirm');
   }
 
@@ -1953,7 +2045,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     document.getElementById('ai-conf-av').textContent = ini(name);
     document.getElementById('ai-conf-name').textContent = name;
     var matchEl = document.getElementById('ai-conf-match');
-    matchEl.textContent = '✓ Matched: ' + name;
+    matchEl.textContent = 'âœ“ Matched: ' + name;
     matchEl.style.color = 'var(--success)';
     document.getElementById('ai-override-drop').style.display = 'none';
     document.getElementById('ai-override-search').value = name;
@@ -1992,7 +2084,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
       msg2.textContent = 'Result "' + (p.result||'') + '" is not valid. Go back and be more specific.'; msg2.className = 'msg error'; return;
     }
     var btn = document.getElementById('ai-confirm-btn');
-    btn.disabled = true; btn.textContent = 'Saving…';
+    btn.disabled = true; btn.textContent = 'Saving...';
 
     var payload = {
       personId:            p.personId,
@@ -2021,16 +2113,16 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
         }
         var todoNote = aiTodos.length ? ' ' + aiTodos.length + ' action item' + (aiTodos.length > 1 ? 's' : '') + ' added.' : '';
         document.getElementById('ai-success-sub').textContent =
-          (res.offline ? '📶 Saved offline - ' : 'Call with ') + p.personName +
+          (res.offline ? 'ðŸ“¶ Saved offline - ' : 'Call with ') + p.personName +
           (res.offline ? ' will sync when reconnected.' : ' has been logged.') + todoNote;
         aiShowStep('success');
       } else {
-        btn.disabled = false; btn.textContent = '✓ Log This Call';
+        btn.disabled = false; btn.textContent = 'âœ“ Log This Call';
         var msg = document.getElementById('ai-confirm-msg');
         msg.textContent = 'Save failed: ' + (res && res.error ? res.error : 'Unknown'); msg.className = 'msg error';
       }
     }).catch(function(e) {
-      btn.disabled = false; btn.textContent = '✓ Log This Call';
+      btn.disabled = false; btn.textContent = 'âœ“ Log This Call';
       var msg = document.getElementById('ai-confirm-msg');
       msg.textContent = 'Error: ' + String(e); msg.className = 'msg error';
     });
