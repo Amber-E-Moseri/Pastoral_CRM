@@ -99,7 +99,7 @@ function doGet(e) {
     }
 
     if (action === 'debugAnalytics') {
-      return json_(normalizeResponse_(api_debugAnalytics()));
+      return json_(respond_(false, null, 'debugAnalytics is disabled in production.'));
     }
 
     if (action === 'searchInteractions') {
@@ -216,6 +216,18 @@ function normalizeResponse_(result) {
   if (Array.isArray(result)) return respond_(true, { data: result });
   if (result && typeof result === 'object') return respond_(true, result);
   return respond_(true, { data: result });
+}
+
+function withScriptLock_(fn) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    return { success: false, error: 'System is busy. Please try again.' };
+  }
+  try {
+    return fn();
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
 }
 
 
@@ -427,49 +439,53 @@ function api_getPeopleWithCadence() {
 // ─── API: SAVE CADENCE ───────────────────────────────────────
 
 function api_saveCadence(personId, cadenceDays) {
-  if (!personId)   return { success: false, error: 'Missing personId.' };
-  if (!cadenceDays || cadenceDays < 1) return { success: false, error: 'Cadence must be at least 1 day.' };
+  return withScriptLock_(function() {
+    if (!personId)   return { success: false, error: 'Missing personId.' };
+    if (!cadenceDays || cadenceDays < 1) return { success: false, error: 'Cadence must be at least 1 day.' };
 
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
-  if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
+    if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
 
-  const data    = sheet.getDataRange().getValues();
-  const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
-  const pidCol  = headers.indexOf('personid');
-  const cadCol  = headers.indexOf('cadencedays');
+    const data    = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const pidCol  = headers.indexOf('personid');
+    const cadCol  = headers.indexOf('cadencedays');
 
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][pidCol]) === String(personId)) {
-      sheet.getRange(i + 1, cadCol + 1).setValue(cadenceDays);
-      cacheBust_();
-      return { success: true };
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][pidCol]) === String(personId)) {
+        sheet.getRange(i + 1, cadCol + 1).setValue(cadenceDays);
+        cacheBust_();
+        return { success: true };
+      }
     }
-  }
-  return { success: false, error: 'Person not found.' };
+    return { success: false, error: 'Person not found.' };
+  });
 }
 
 
 // ─── API: SET ACTIVE ─────────────────────────────────────────
 
 function api_setActive(personId, active) {
-  if (!personId) return { success: false, error: 'Missing personId.' };
+  return withScriptLock_(function() {
+    if (!personId) return { success: false, error: 'Missing personId.' };
 
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
-  if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
+    if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
 
-  const data    = sheet.getDataRange().getValues();
-  const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
-  const pidCol  = headers.indexOf('personid');
-  const actCol  = headers.indexOf('active');
+    const data    = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const pidCol  = headers.indexOf('personid');
+    const actCol  = headers.indexOf('active');
 
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][pidCol]) === String(personId)) {
-      sheet.getRange(i + 1, actCol + 1).setValue(active === 'true' ? true : false);
-      cacheBust_();
-      return { success: true };
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][pidCol]) === String(personId)) {
+        sheet.getRange(i + 1, actCol + 1).setValue(active === 'true' ? true : false);
+        cacheBust_();
+        return { success: true };
+      }
     }
-  }
-  return { success: false, error: 'Person not found.' };
+    return { success: false, error: 'Person not found.' };
+  });
 }
 
 
@@ -499,103 +515,108 @@ function api_getSettings() {
 }
 
 function api_saveSetting(key, val) {
-  if (!key) return { success: false, error: 'Missing key.' };
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_SETTINGS);
-  if (!sheet) return { success: false, error: 'SETTINGS sheet not found.' };
-  const data = sheet.getDataRange().getValues();
-  for (let i = 0; i < data.length; i++) {
-    if (String(data[i][0]).trim().toUpperCase() === key.toUpperCase()) {
-      sheet.getRange(i + 1, 2).setValue(val);
-      return { success: true };
+  return withScriptLock_(function() {
+    if (!key) return { success: false, error: 'Missing key.' };
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_SETTINGS);
+    if (!sheet) return { success: false, error: 'SETTINGS sheet not found.' };
+    const data = sheet.getDataRange().getValues();
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][0]).trim().toUpperCase() === key.toUpperCase()) {
+        sheet.getRange(i + 1, 2).setValue(val);
+        return { success: true };
+      }
     }
-  }
-  sheet.appendRow([key, val]);
-  return { success: true };
+    sheet.appendRow([key, val]);
+    return { success: true };
+  });
 }
 
 
 // ─── API: ADD PERSON ─────────────────────────────────────────
 
 function api_addPerson(payload) {
-  try {
-    const name = sanitize_(payload.name || '', 120);
-    if (!name) return { success: false, error: 'Full name is required.' };
+  return withScriptLock_(function() {
+    try {
+      const name = sanitize_(payload.name || '', 120);
+      if (!name) return { success: false, error: 'Full name is required.' };
 
-    const ss    = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(SHEET_PEOPLE);
-    if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
+      const ss    = SpreadsheetApp.getActiveSpreadsheet();
+      const sheet = ss.getSheetByName(SHEET_PEOPLE);
+      if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
 
-    const data    = sheet.getDataRange().getValues();
-    const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
-    const idx     = h => headers.indexOf(h);
+      const data    = sheet.getDataRange().getValues();
+      const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+      const idx     = h => headers.indexOf(h);
 
-    for (let i = 1; i < data.length; i++) {
-      if (isActiveVal_(data[i][idx('active')]) &&
-          String(data[i][idx('fullname')]).trim().toLowerCase() === name.toLowerCase()) {
-        return { success: false, error: 'A person with this name already exists.' };
+      for (let i = 1; i < data.length; i++) {
+        if (isActiveVal_(data[i][idx('active')]) &&
+            String(data[i][idx('fullname')]).trim().toLowerCase() === name.toLowerCase()) {
+          return { success: false, error: 'A person with this name already exists.' };
+        }
       }
+
+      const pid     = 'P' + Date.now();
+      const cadence = parseInt(payload.cadenceDays) > 0 ? parseInt(payload.cadenceDays) : 30;
+
+      const row = new Array(headers.length).fill('');
+      if (idx('personid')   >= 0) row[idx('personid')]    = pid;
+      if (idx('fullname')   >= 0) row[idx('fullname')]    = name;
+      if (idx('role')       >= 0) row[idx('role')]        = String(payload.role       || '').trim();
+      if (idx('fellowship') >= 0) row[idx('fellowship')]  = String(payload.fellowship || '').trim();
+      if (idx('cadencedays')>= 0) row[idx('cadencedays')] = cadence;
+      if (idx('active')     >= 0) row[idx('active')]      = true;
+      if (idx('nextduedate')>= 0) row[idx('nextduedate')] = '';
+      if (idx('duestatus')  >= 0) row[idx('duestatus')]   = 'Scheduled';
+      if (idx('priority')   >= 0) row[idx('priority')]    = String(payload.priority   || '').trim();
+
+      sheet.appendRow(row);
+      cacheBust_();
+      return { success: true, personId: pid, name: name };
+    } catch(e) {
+      return { success: false, error: e.message };
     }
-
-    const pid     = 'P' + Date.now();
-    const cadence = parseInt(payload.cadenceDays) > 0 ? parseInt(payload.cadenceDays) : 30;
-    const now     = new Date();
-
-    const row = new Array(headers.length).fill('');
-    if (idx('personid')   >= 0) row[idx('personid')]    = pid;
-    if (idx('fullname')   >= 0) row[idx('fullname')]    = name;
-    if (idx('role')       >= 0) row[idx('role')]        = String(payload.role       || '').trim();
-    if (idx('fellowship') >= 0) row[idx('fellowship')]  = String(payload.fellowship || '').trim();
-    if (idx('cadencedays')>= 0) row[idx('cadencedays')] = cadence;
-    if (idx('active')     >= 0) row[idx('active')]      = true;
-    // New people start as Scheduled with no explicit due date,
-    // so they appear in the "No Date Set" bucket until first planning/log.
-    if (idx('nextduedate')>= 0) row[idx('nextduedate')] = '';
-    if (idx('duestatus')  >= 0) row[idx('duestatus')]   = 'Scheduled';
-    if (idx('priority')   >= 0) row[idx('priority')]    = String(payload.priority   || '').trim();
-
-    sheet.appendRow(row);
-    cacheBust_();
-    return { success: true, personId: pid, name: name };
-  } catch(e) {
-    return { success: false, error: e.message };
-  }
+  });
 }
 
 
 // ─── DUPLICATE INTERACTION CHECK ─────────────────────────────
 
 function api_editPerson(payload) {
-  try {
-    payload = payload || {};
-    const personId = String(payload.personId || '').trim();
-    const name = sanitize_(payload.name || '', 120);
-    if (!personId) return { success: false, error: 'Missing personId.' };
-    if (!name) return { success: false, error: 'Name is required.' };
+  return withScriptLock_(function() {
+    try {
+      payload = payload || {};
+      const personId = String(payload.personId || '').trim();
+      const name = sanitize_(payload.name || '', 120);
+      if (!personId) return { success: false, error: 'Missing personId.' };
+      if (!name) return { success: false, error: 'Name is required.' };
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
-    if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
+      const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
+      if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
 
-    const data = sheet.getDataRange().getValues();
-    if (!data.length) return { success: false, error: 'PEOPLE sheet is empty.' };
-    const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
-    const idx = h => headers.indexOf(h);
-    const pidCol = idx('personid');
-    if (pidCol < 0) return { success: false, error: 'PEOPLE headers are invalid.' };
+      const data = sheet.getDataRange().getValues();
+      if (!data.length) return { success: false, error: 'PEOPLE sheet is empty.' };
+      const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+      const idx = h => headers.indexOf(h);
+      const pidCol = idx('personid');
+      if (pidCol < 0) return { success: false, error: 'PEOPLE headers are invalid.' };
 
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][pidCol]).trim() === personId) {
-        if (idx('fullname') >= 0) sheet.getRange(i + 1, idx('fullname') + 1).setValue(name);
-        if (idx('role') >= 0) sheet.getRange(i + 1, idx('role') + 1).setValue(String(payload.role || '').trim());
-        if (idx('fellowship') >= 0) sheet.getRange(i + 1, idx('fellowship') + 1).setValue(String(payload.fellowship || '').trim());
-        if (idx('priority') >= 0) sheet.getRange(i + 1, idx('priority') + 1).setValue(String(payload.priority || '').trim());
-        cacheBust_();
-        return { success: true };
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][pidCol]).trim() === personId) {
+          const rowVals = data[i].slice();
+          if (idx('fullname') >= 0) rowVals[idx('fullname')] = name;
+          if (idx('role') >= 0) rowVals[idx('role')] = String(payload.role || '').trim();
+          if (idx('fellowship') >= 0) rowVals[idx('fellowship')] = String(payload.fellowship || '').trim();
+          if (idx('priority') >= 0) rowVals[idx('priority')] = String(payload.priority || '').trim();
+          sheet.getRange(i + 1, 1, 1, headers.length).setValues([rowVals]);
+          cacheBust_();
+          return { success: true };
+        }
       }
+      return { success: false, error: 'Person not found.' };
+    } catch (e) {
+      return { success: false, error: e.message };
     }
-    return { success: false, error: 'Person not found.' };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+  });
 }
 
 function isDuplicateInteraction_(payload) {
@@ -617,14 +638,16 @@ function isDuplicateInteraction_(payload) {
 // ─── API: SAVE INTERACTION ───────────────────────────────────
 
 function api_saveInteraction(payload) {
-  try {
-    payload = payload || {};
-    payload.fullName = sanitize_(payload.fullName || '', 120);
-    payload.summary = sanitize_(payload.summary || '', 2000);
-    return saveInteractionCore_(payload);
-  } catch(e) {
-    return { success: false, error: e.message };
-  }
+  return withScriptLock_(function() {
+    try {
+      payload = payload || {};
+      payload.fullName = sanitize_(payload.fullName || '', 120);
+      payload.summary = sanitize_(payload.summary || '', 2000);
+      return saveInteractionCore_(payload);
+    } catch(e) {
+      return { success: false, error: e.message };
+    }
+  });
 }
 
 function saveInteractionCore_(payload) {
@@ -1492,30 +1515,32 @@ function api_getPersonNotes(personId) {
 }
 
 function api_savePersonNotes(personId, notes) {
-  if (!personId) return { success: false, error: 'Missing personId.' };
-  const cleanNotes = sanitize_(notes || '', 5000);
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
-  if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
+  return withScriptLock_(function() {
+    if (!personId) return { success: false, error: 'Missing personId.' };
+    const cleanNotes = sanitize_(notes || '', 5000);
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEOPLE);
+    if (!sheet) return { success: false, error: 'PEOPLE sheet not found.' };
 
-  const data    = sheet.getDataRange().getValues();
-  const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
-  const idx     = h => headers.indexOf(h);
+    const data    = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => h.toString().trim().toLowerCase().replace(/\s/g,''));
+    const idx     = h => headers.indexOf(h);
 
-  let notesCol = idx('notes');
-  if (notesCol < 0) {
-    const newCol = data[0].length + 1;
-    sheet.getRange(1, newCol).setValue('Notes').setFontWeight('bold')
-      .setBackground('#1a73e8').setFontColor('#ffffff');
-    notesCol = newCol - 1;
-  }
-
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][idx('personid')]) === String(personId)) {
-      sheet.getRange(i + 1, notesCol + 1).setValue(cleanNotes);
-      return { success: true };
+    let notesCol = idx('notes');
+    if (notesCol < 0) {
+      const newCol = data[0].length + 1;
+      sheet.getRange(1, newCol).setValue('Notes').setFontWeight('bold')
+        .setBackground('#1a73e8').setFontColor('#ffffff');
+      notesCol = newCol - 1;
     }
-  }
-  return { success: false, error: 'Person not found.' };
+
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][idx('personid')]) === String(personId)) {
+        sheet.getRange(i + 1, notesCol + 1).setValue(cleanNotes);
+        return { success: true };
+      }
+    }
+    return { success: false, error: 'Person not found.' };
+  });
 }
 
 
@@ -1583,46 +1608,49 @@ function api_getTodos(personId) {
 }
 
 function api_saveTodos(payload) {
-  try {
-    const { interactionId, personId, personName, todos } = payload;
-    if (!personId || !Array.isArray(todos) || !todos.length) return { success: false, error: 'Missing fields.' };
+  return withScriptLock_(function() {
+    try {
+      const { interactionId, personId, personName, todos } = payload;
+      if (!personId || !Array.isArray(todos) || !todos.length) return { success: false, error: 'Missing fields.' };
 
-    const ss    = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet   = ss.getSheetByName(SHEET_TODOS);
-    if (!sheet) {
-      sheet = ss.insertSheet(SHEET_TODOS);
-      sheet.getRange(1,1,1,9).setValues([['TodoID','CreatedAt','PersonID','PersonName','InteractionID','Text','DueDate','Done','CompletedAt']])
-        .setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
+      const ss    = SpreadsheetApp.getActiveSpreadsheet();
+      let sheet   = ss.getSheetByName(SHEET_TODOS);
+      if (!sheet) {
+        sheet = ss.insertSheet(SHEET_TODOS);
+        sheet.getRange(1,1,1,9).setValues([['TodoID','CreatedAt','PersonID','PersonName','InteractionID','Text','DueDate','Done','CompletedAt']])
+          .setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
+      }
+      ensureTodoDueDateColumn_(sheet);
+
+      const now = new Date();
+      todos.forEach((t, i) => {
+        const text = String(t.text || '').trim();
+        if (!text) return;
+        const dueDate = parseDueDate_(t.dueDate);
+        sheet.appendRow([
+          'TD' + now.getTime() + '_' + i,
+          now,
+          personId,
+          personName || '',
+          interactionId || '',
+          text,
+          dueDate || '',
+          false,
+          ''
+        ]);
+      });
+
+      cacheBust_();
+      return { success: true, saved: todos.length };
+    } catch(e) {
+      return { success: false, error: e.message };
     }
-    ensureTodoDueDateColumn_(sheet);
-
-    const now = new Date();
-    todos.forEach((t, i) => {
-      const text = String(t.text || '').trim();
-      if (!text) return;
-      const dueDate = parseDueDate_(t.dueDate);
-      sheet.appendRow([
-        'TD' + now.getTime() + '_' + i,
-        now,
-        personId,
-        personName || '',
-        interactionId || '',
-        text,
-        dueDate || '',
-        false,
-        ''
-      ]);
-    });
-
-    cacheBust_();
-    return { success: true, saved: todos.length };
-  } catch(e) {
-    return { success: false, error: e.message };
-  }
+  });
 }
 
 function api_updateTodo(todoId, done) {
-  try {
+  return withScriptLock_(function() {
+    try {
     if (!todoId) return { success: false, error: 'Missing todoId.' };
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_TODOS);
     if (!sheet) return { success: false, error: 'TODOS sheet not found.' };
@@ -1647,9 +1675,10 @@ function api_updateTodo(todoId, done) {
     sheet.getRange(row, idx('completedat') + 1).setValue(isDone ? new Date() : '');
     cacheBust_();
     return { success: true };
-  } catch(e) {
-    return { success: false, error: e.message };
-  }
+    } catch(e) {
+      return { success: false, error: e.message };
+    }
+  });
 }
 
 // ─── MENU ────────────────────────────────────────────────────
@@ -1696,7 +1725,8 @@ function debugDuePeople() {
 }
 
 function api_updateTodoText(todoId, text) {
-  try {
+  return withScriptLock_(function() {
+    try {
     if (!todoId) return { success: false, error: 'Missing todoId.' };
     const nextText = String(text || '').trim();
     if (!nextText) return { success: false, error: 'Task text cannot be empty.' };
@@ -1720,13 +1750,15 @@ function api_updateTodoText(todoId, text) {
     sheet.getRange(found.getRow(), textIdx + 1).setValue(nextText);
     cacheBust_();
     return { success: true };
-  } catch(e) {
-    return { success: false, error: e.message };
-  }
+    } catch(e) {
+      return { success: false, error: e.message };
+    }
+  });
 }
 
 function api_deleteTodo(todoId) {
-  try {
+  return withScriptLock_(function() {
+    try {
     if (!todoId) return { success: false, error: 'Missing todoId.' };
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_TODOS);
     if (!sheet) return { success: false, error: 'TODOS sheet not found.' };
@@ -1746,13 +1778,15 @@ function api_deleteTodo(todoId) {
     sheet.deleteRow(found.getRow());
     cacheBust_();
     return { success: true };
-  } catch(e) {
-    return { success: false, error: e.message };
-  }
+    } catch(e) {
+      return { success: false, error: e.message };
+    }
+  });
 }
 
 function api_updateTodoDueDate(todoId, dueDate) {
-  try {
+  return withScriptLock_(function() {
+    try {
     if (!todoId) return { success: false, error: 'Missing todoId.' };
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_TODOS);
     if (!sheet) return { success: false, error: 'TODOS sheet not found.' };
@@ -1776,9 +1810,10 @@ function api_updateTodoDueDate(todoId, dueDate) {
     sheet.getRange(found.getRow(), dueIdx + 1).setValue(parsed || '');
     cacheBust_();
     return { success: true };
-  } catch(e) {
-    return { success: false, error: e.message };
-  }
+    } catch(e) {
+      return { success: false, error: e.message };
+    }
+  });
 }
 
 function ensureSettingKey_(sheet, key, defaultVal) {
@@ -1787,11 +1822,18 @@ function ensureSettingKey_(sheet, key, defaultVal) {
   for (let i = 0; i < data.length; i++) {
     if (String(data[i][0] || '').trim().toUpperCase() === String(key).trim().toUpperCase()) return;
   }
-  sheet.appendRow([key, defaultVal == null ? '' : defaultVal]);
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return;
+  try {
+    sheet.appendRow([key, defaultVal == null ? '' : defaultVal]);
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
 }
 
 function api_updateTodoAssignee(todoId, personId, personName) {
-  try {
+  return withScriptLock_(function() {
+    try {
     if (!todoId) return { success: false, error: 'Missing todoId.' };
     if (!personId) return { success: false, error: 'Missing personId.' };
 
@@ -1822,9 +1864,10 @@ function api_updateTodoAssignee(todoId, personId, personName) {
     sheet.getRange(row, pnameIdx + 1).setValue(nextName || 'My Tasks');
     cacheBust_();
     return { success: true };
-  } catch(e) {
-    return { success: false, error: e.message };
-  }
+    } catch(e) {
+      return { success: false, error: e.message };
+    }
+  });
 }
 
 function ensureTodoDueDateColumn_(sheet) {

@@ -184,7 +184,7 @@
         '<div class="aset-desc">Used in greetings and reminders.</div>' +
         '<div class="aset-row-ctrl aset-row-ctrl-name">' +
           '<input class="aset-input" id="appsettings-your-name" value="' + esc(nameEntry.val || '') + '" placeholder="e.g. Pastor John">' +
-          '<button class="aset-save" id="appsettings-your-name-btn" onclick="saveYourName()">Save</button>' +
+          '<button class="aset-save" id="appsettings-your-name-btn" data-action="save-your-name">Save</button>' +
           '<span class="aset-status" id="appsettings-your-name-status"></span>' +
         '</div>' +
       '</div>';
@@ -232,7 +232,7 @@
         var ctrlHtml =
           '<div class="aset-row-ctrl">' +
             '<input class="aset-input" id="aset-' + k + '" value="' + esc(s.val) + '" placeholder="-">' +
-            '<button class="aset-save" id="assave-' + k + '" onclick="saveAppSetting(\'' + k + '\')">Save</button>' +
+            '<button class="aset-save" id="assave-' + k + '" data-action="save-app-setting" data-key="' + k + '">Save</button>' +
             '<span class="aset-status" id="asstat-' + k + '"></span>' +
           '</div>';
         return '<div class="aset-row">' +
@@ -414,10 +414,10 @@
           '<div class="ai-mini-label">Change date</div>' +
           '<input type="datetime-local" id="ai-date-input">' +
           '<div class="ai-date-shortcuts">' +
-            '<button class="ai-date-chip" type="button" onclick="aiApplyDateShortcut(\'tomorrow\')">Tomorrow</button>' +
-            '<button class="ai-date-chip" type="button" onclick="aiApplyDateShortcut(\'friday\')">This Friday</button>' +
-            '<button class="ai-date-chip" type="button" onclick="aiApplyDateShortcut(\'nextweek\')">Next week</button>' +
-            '<button class="ai-date-chip" type="button" onclick="aiApplyDateShortcut(\'twoweeks\')">2 Weeks</button>' +
+            '<button class="ai-date-chip" type="button" data-action="ai-date-shortcut" data-shortcut="tomorrow">Tomorrow</button>' +
+            '<button class="ai-date-chip" type="button" data-action="ai-date-shortcut" data-shortcut="friday">This Friday</button>' +
+            '<button class="ai-date-chip" type="button" data-action="ai-date-shortcut" data-shortcut="nextweek">Next week</button>' +
+            '<button class="ai-date-chip" type="button" data-action="ai-date-shortcut" data-shortcut="twoweeks">2 Weeks</button>' +
           '</div>' +
           '' +
         '</div>');
@@ -470,7 +470,7 @@
     if (!list.length) { drop.style.display='block'; drop.innerHTML='<div class="no-results">No matches</div>'; return; }
     drop.style.display='block';
     drop.innerHTML = list.map(function(p){
-      return '<button type="button" class="ai-suggestion-btn" onclick="aiChoosePerson(\'' + esc(String(p.id)) + '\')">' + esc(p.name || p.id) + '<div style="font-size:11px;color:var(--muted);margin-top:2px;">' + esc(p.id || '') + '</div></button>';
+      return '<button type="button" class="ai-suggestion-btn" data-action="ai-choose-person" data-pid="' + esc(String(p.id)) + '">' + esc(p.name || p.id) + '<div style="font-size:11px;color:var(--muted);margin-top:2px;">' + esc(p.id || '') + '</div></button>';
     }).join('');
   };
 
@@ -505,7 +505,7 @@
       inline.classList.toggle('open', parsed.matchConfidence !== 'high');
       if (drop && parsed.suggestions && parsed.suggestions.length) {
         drop.style.display = 'block';
-        drop.innerHTML = '<div class="ai-mini-label" style="padding:10px 10px 0;">Did you meanâ€¦?</div>' + parsed.suggestions.map(function(item){ return '<button type="button" class="ai-suggestion-btn" onclick="aiChoosePerson(\'' + esc(String(item.person.id)) + '\')">' + esc(item.person.name || item.person.id) + '<div style="font-size:11px;color:var(--muted);margin-top:2px;">' + Math.round(item.score*100) + '% match</div></button>'; }).join('');
+        drop.innerHTML = '<div class="ai-mini-label" style="padding:10px 10px 0;">Did you meanâ€¦?</div>' + parsed.suggestions.map(function(item){ return '<button type="button" class="ai-suggestion-btn" data-action="ai-choose-person" data-pid="' + esc(String(item.person.id)) + '">' + esc(item.person.name || item.person.id) + '<div style="font-size:11px;color:var(--muted);margin-top:2px;">' + Math.round(item.score*100) + '% match</div></button>'; }).join('');
       } else if (drop) {
         drop.style.display = 'none';
       }
@@ -676,6 +676,16 @@
     }, 120);
     return ret;
   };
+
+  document.addEventListener('click', function(e){
+    var actionEl = e.target.closest('[data-action]');
+    if (!actionEl) return;
+    var action = actionEl.getAttribute('data-action');
+    if (action === 'save-your-name') { saveYourName(); return; }
+    if (action === 'save-app-setting') { saveAppSetting(actionEl.getAttribute('data-key') || ''); return; }
+    if (action === 'ai-date-shortcut') { aiApplyDateShortcut(actionEl.getAttribute('data-shortcut') || 'tomorrow'); return; }
+    if (action === 'ai-choose-person') { aiChoosePerson(actionEl.getAttribute('data-pid') || ''); return; }
+  });
 
   document.addEventListener('input', function(e){
     var id = e.target && e.target.id;

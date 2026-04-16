@@ -23,6 +23,19 @@
   var _navigating = false;
   var _addPersonReturn = null;
 
+  function showApiMissingBanner_() {
+    if (API || document.getElementById('api-missing-banner')) return;
+    var banner = document.createElement('div');
+    banner.id = 'api-missing-banner';
+    banner.textContent = 'API URL is missing. Set <meta name="flock-api-url" content="..."> in index.html.';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#fef3c7;color:#7c2d12;border-bottom:1px solid #fcd34d;padding:10px 14px;font-size:13px;font-weight:600;text-align:center;';
+    document.body.appendChild(banner);
+  }
+  if (!API) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showApiMissingBanner_);
+    else showApiMissingBanner_();
+  }
+
   function updateMobileTabState_(pageId) {
     var bar = document.getElementById('mobile-tab-bar');
     if (!bar) return;
@@ -487,7 +500,7 @@
       return;
     }
     box.innerHTML = filtered.map(function(p, i){
-      return '<div class="drop-item" onclick="pickPersonFromDrop(' + i + ')"><div class="drop-av">' + ini(p.name) + '</div>' + esc(p.name) + '</div>';
+      return '<div class="drop-item" data-action="pick-person-drop" data-idx="' + i + '"><div class="drop-av">' + ini(p.name) + '</div>' + esc(p.name) + '</div>';
     }).join('');
   }
 
@@ -557,7 +570,7 @@
         h += '</div>';
       });
       if (list.length > 3) {
-        h += '<div style="padding:9px 14px;border-top:1px solid var(--line);"><button type="button" onclick="goHistoryPerson(\'' + esc(pid) + '\')" style="background:none;border:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--accent);cursor:pointer;padding:0;">View full history (' + list.length + ' total) ></button></div>';
+        h += '<div style="padding:9px 14px;border-top:1px solid var(--line);"><button type="button" data-action="go-history-person" data-pid="' + esc(pid) + '" style="background:none;border:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--accent);cursor:pointer;padding:0;">View full history (' + list.length + ' total) ></button></div>';
       }
       h += '</div>';
       body.innerHTML = h;
@@ -610,6 +623,17 @@
   });
 
   document.addEventListener('click', function(e){
+    var actionEl = e.target.closest('[data-action]');
+    if (actionEl) {
+      var action = actionEl.getAttribute('data-action');
+      if (action === 'pick-person-drop') { pickPersonFromDrop(Number(actionEl.getAttribute('data-idx') || -1)); return; }
+      if (action === 'go-history-person') { goHistoryPerson(actionEl.getAttribute('data-pid') || ''); return; }
+      if (action === 'save-app-setting') { saveAppSetting(actionEl.getAttribute('data-key') || ''); return; }
+      if (action === 'save-cad') { saveCad(actionEl.getAttribute('data-pid') || ''); return; }
+      if (action === 'open-edit-modal') { openEditModal(actionEl.getAttribute('data-pid') || ''); return; }
+      if (action === 'set-analytics-range') { setAnalyticsRange(actionEl.getAttribute('data-range') || '1m'); return; }
+      if (action === 'open-bsheet') { openBsheet(actionEl.getAttribute('data-pid') || '', actionEl.getAttribute('data-name') || '', 'who_to_call'); return; }
+    }
     var dashRow = e.target.closest('.js-dash-open');
     var dashLog = e.target.closest('.js-dash-log');
     if (dashLog) {
@@ -933,7 +957,7 @@ function renderHistory(list, personName) {
           ctrlHtml =
             '<div class="aset-row-ctrl">' +
               '<input class="aset-input" id="aset-' + k + '" value="' + esc(s.val) + '" placeholder="-">' +
-              '<button class="aset-save" id="assave-' + k + '" onclick="saveAppSetting(\'' + k + '\')">Save</button>' +
+              '<button class="aset-save" id="assave-' + k + '" data-action="save-app-setting" data-key="' + k + '">Save</button>' +
               '<span class="aset-status" id="asstat-' + k + '"></span>' +
             '</div>';
         }
@@ -1079,9 +1103,9 @@ function renderHistory(list, personName) {
         '<div class="cad-bottom">' +
           '<input class="cad-input" type="number" min="1" max="365" id="cad-' + pid + '" value="' + p.cadenceDays + '">' +
           '<span class="cad-days-label">days</span>' +
-          '<button class="cad-save" id="csave-' + pid + '" onclick="saveCad(\'' + pid + '\')">Save</button>' +
+          '<button class="cad-save" id="csave-' + pid + '" data-action="save-cad" data-pid="' + pid + '">Save</button>' +
           '<span class="cad-status" id="cstat-' + pid + '"></span>' +
-          '<button class="cad-edit" onclick="openEditModal(\'' + pid + '\')" title="Edit" style="margin-left:auto;">Edit</button>' +
+          '<button class="cad-edit" data-action="open-edit-modal" data-pid="' + pid + '" title="Edit" style="margin-left:auto;">Edit</button>' +
         '</div>' +
       '</div>';
     }).join('');
@@ -1346,8 +1370,8 @@ function renderHistory(list, personName) {
     // â”€â”€ Range toggle â”€â”€
     var toggleHtml =
       '<div class="an-range-toggle">' +
-        '<button class="an-range-btn' + (analyticsRange === '1m' ? ' active' : '') + '" onclick="setAnalyticsRange(\'1m\')">Last Month</button>' +
-        '<button class="an-range-btn' + (analyticsRange === '3m' ? ' active' : '') + '" onclick="setAnalyticsRange(\'3m\')">Last 3 Months</button>' +
+        '<button class="an-range-btn' + (analyticsRange === '1m' ? ' active' : '') + '" data-action="set-analytics-range" data-range="1m">Last Month</button>' +
+        '<button class="an-range-btn' + (analyticsRange === '3m' ? ' active' : '') + '" data-action="set-analytics-range" data-range="3m">Last 3 Months</button>' +
       '</div>';
 
     // â”€â”€ Line chart â”€â”€
@@ -1371,7 +1395,7 @@ function renderHistory(list, personName) {
           ? 'Last contact: ' + esc(p.lastContact) + (p.weeksSince ? ' (' + p.weeksSince + ' weeks ago)' : '')
           : 'No contact recorded';
         var pid = esc(p.pid || '');
-        silentHtml += '<div class="an-silent-row" style="cursor:pointer;" onclick="openBsheet(\'' + pid + '\',\'' + esc(p.name) + '\')">' +
+        silentHtml += '<div class="an-silent-row" style="cursor:pointer;" data-action="open-bsheet" data-pid="' + pid + '" data-name="' + esc(p.name) + '">' +
           '<div class="an-silent-av">' + esc(ini(p.name)) + '</div>' +
           '<div style="flex:1;min-width:0;"><div class="an-silent-name">' + esc(p.name) + '</div><div class="an-silent-sub">' + sub + '</div></div>' +
           '<div style="font-size:11px;font-weight:600;color:var(--accent);flex-shrink:0;padding-left:8px;">Quick Log -></div>' +
@@ -2155,7 +2179,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
           : r.result === 'Left Message'     ? 'rb-message'
           : r.result === 'Rescheduled Call' ? 'rb-resched'
           : 'rb-attempt';
-        h += '<div class="search-result-card" onclick="goHistoryPerson(\'' + esc(r.personId) + '\')">';
+        h += '<div class="search-result-card" data-action="go-history-person" data-pid="' + esc(r.personId) + '">';
         h += '<div class="search-result-name">' + esc(r.personName) + '</div>';
         h += '<div class="search-result-meta"><span class="search-result-date">' + esc(r.timestamp) + '</span>';
         h += '<span class="search-result-badge ' + badgeCls + '">' + esc(r.result || r.outcome) + '</span></div>';
