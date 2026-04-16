@@ -41,8 +41,6 @@ function getAppUrl_() {
 
 function doGet(e) {
   try {
-    const authErr = assertAuthorized_(e);
-    if (authErr) return json_(authErr);
     const action = (e && e.parameter && e.parameter.action) ? e.parameter.action : null;
     const postOnlyActions = {
       saveInteraction: true,
@@ -134,8 +132,6 @@ function doGet(e) {
 function doPost(e) {
   try {
     const body = parsePostBody_(e);
-    const authErr = assertAuthorized_(e, body);
-    if (authErr) return json_(authErr);
     const action = (e && e.parameter && e.parameter.action) || body.action || '';
 
     if (action === 'saveInteraction') {
@@ -206,17 +202,6 @@ function sanitize_(value, maxLength) {
     throw new Error('Input exceeds max length of ' + maxLength + ' characters.');
   }
   return out;
-}
-
-function assertAuthorized_(e, body) {
-  const token =
-    String((e && e.parameter && e.parameter.token) || '').trim() ||
-    String((body && body.token) || '').trim();
-  const expected = String(getSetting_('API_TOKEN') || '').trim();
-  if (!expected || token !== expected) {
-    return respond_(false, null, 'Unauthorized');
-  }
-  return null;
 }
 
 function respond_(ok, data, err) {
@@ -322,7 +307,6 @@ function setupSystem() {
   const followupHeaders    = ['TaskID','CreatedAt','PersonID','TaskType','DueDateTime',
                               'Status','LinkedInteractionID','CompletedAt','CompletionNote'];
   const settingsData       = [
-    ['API_TOKEN',''],
     ['NOTIFICATIONS_ENABLED','true'],
     ['REMINDER_EMAIL','your@email.com'],
     ['MORNING_REMINDER_HOUR','8'],
@@ -515,7 +499,6 @@ function api_setActive(personId, active) {
 // ─── API: GET / SAVE APP SETTINGS ────────────────────────────
 
 const SETTINGS_META = {
-  API_TOKEN:              { label: 'API Token',             desc: 'Shared API secret token.', hidden: true },
   NOTIFICATIONS_ENABLED:  { label: 'Notifications',         desc: 'Turn daily and weekly reminder notifications on or off.' },
   REMINDER_EMAIL:         { label: 'Reminder Email',        desc: 'Email address(es) to receive daily and weekly reminders. Separate multiple with commas.' },
   MORNING_REMINDER_HOUR:  { label: 'Morning Reminder Hour', desc: 'Hour (0–23) to send the daily due-now email.' },

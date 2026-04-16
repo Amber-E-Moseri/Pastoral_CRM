@@ -4,11 +4,6 @@
     var m = document.querySelector('meta[name="flock-api-url"]');
     return (m && m.getAttribute('content') ? m.getAttribute('content').trim() : '');
   })();
-  var API_TOKEN = (function() {
-    var m = document.querySelector('meta[name="flock-api-token"]');
-    if (m && m.getAttribute('content')) return m.getAttribute('content').trim();
-    try { return (localStorage.getItem('flock-api-token') || '').trim(); } catch(e) { return ''; }
-  })();
   //  Hash-based routing 
   var HASH_MAP = {
     'home':        'pg-home',
@@ -124,7 +119,6 @@
         url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
       });
     }
-    if (API_TOKEN) url += '&token=' + encodeURIComponent(API_TOKEN);
     var controller = new AbortController();
     var timeoutId = setTimeout(function() { controller.abort(); }, 15000);
     return fetch(url, { method: 'GET', redirect: 'follow', signal: controller.signal })
@@ -150,7 +144,6 @@
   function apiPost(action, payload) {
     if (!API) return Promise.reject(new Error('API URL is not configured.'));
     payload = payload || {};
-    if (API_TOKEN && !payload.token) payload.token = API_TOKEN;
     var controller = new AbortController();
     var timeoutId = setTimeout(function() { controller.abort(); }, 15000);
     return fetch(API + '?action=' + encodeURIComponent(action), {
