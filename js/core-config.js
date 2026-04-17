@@ -44,6 +44,116 @@
     else showApiMissingBanner_();
   }
 
+  var _globalFallbackShownAt = 0;
+  var _lastGlobalErrorSig = '';
+  var _lastGlobalErrorAt = 0;
+  var _opaqueScriptErrCount = 0;
+  var _opaqueScriptErrTimer = null;
+  function escLocal_(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
+  function showGlobalFallback_(msg) {
+    var now = Date.now();
+    if (now - _globalFallbackShownAt < 1200) return;
+    _globalFallbackShownAt = now;
+    var box = document.getElementById('global-error-fallback');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'global-error-fallback';
+      box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:10000;background:#fff8e8;color:#5f3f16;border:1px solid #e3c27a;border-radius:10px;padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,.15);font-size:13px;line-height:1.4;';
+      document.body.appendChild(box);
+    }
+    box.innerHTML = '<div style="font-weight:700;margin-bottom:2px;">Something went wrong</div><div>' + escLocal_(String(msg || 'The app hit an unexpected error.')) + '</div>';
+  }
+
+  function isOpaqueScriptError_(detail) {
+    var d = String(detail || '').trim().toLowerCase();
+    return d === 'script error.' || d === 'script error' || d === '[object event]';
+  }
+
+  function appLooksReady_() {
+    return !!document.querySelector('.page.active');
+  }
+
+  function shouldDedupGlobalError_(sig, now) {
+    if (!sig) return false;
+    if (sig === _lastGlobalErrorSig && (now - _lastGlobalErrorAt) < 5000) return true;
+    _lastGlobalErrorSig = sig;
+    _lastGlobalErrorAt = now;
+    return false;
+  }
+
+  function handleGlobalError_(err, where, meta) {
+    var now = Date.now();
+    var detail = err && err.message ? err.message : String(err || 'Unknown error');
+    var locationHint = '';
+    if (meta && meta.filename) {
+      locationHint = String(meta.filename) + (meta.lineno ? ':' + String(meta.lineno) : '');
+    }
+    var sig = [where || 'unknown', detail, locationHint].join('|');
+    if (shouldDedupGlobalError_(sig, now)) return;
+
+    if (isOpaqueScriptError_(detail)) {
+      console.warn('[Flock] Opaque script error received:', { where: where, meta: meta });
+      _opaqueScriptErrCount += 1;
+      if (_opaqueScriptErrTimer) clearTimeout(_opaqueScriptErrTimer);
+      _opaqueScriptErrTimer = setTimeout(function() {
+        _opaqueScriptErrTimer = null;
+        var shouldWarn = !appLooksReady_() || _opaqueScriptErrCount >= 3;
+        _opaqueScriptErrCount = 0;
+        if (shouldWarn && window.showUxToast) {
+          window.showUxToast('Some scripts are still loading. If this screen stays blank, refresh.');
+        }
+      }, 2200);
+      return;
+    }
+
+    console.error('[Flock] Global error in ' + (where || 'unknown') + ':', err, meta || '');
+    showGlobalFallback_(detail);
+    if (window.showUxToast) window.showUxToast('An error occurred. You can keep using other sections.');
+  }
+
+  function safeExecute_(fn, where) {
+    try {
+      var out = fn();
+      if (out && typeof out.then === 'function') {
+        return out.catch(function(err) {
+          handleGlobalError_(err, where);
+          return null;
+        });
+      }
+      return Promise.resolve(out);
+    } catch (err) {
+      handleGlobalError_(err, where);
+      return Promise.resolve(null);
+    }
+  }
+
+  function initGlobalErrorBoundary_() {
+    if (window.__flockGlobalErrorBoundaryReady) return;
+    window.__flockGlobalErrorBoundaryReady = true;
+    window.addEventListener('error', function(e) {
+      if (!e) return;
+      handleGlobalError_(e.error || e.message || 'Unexpected runtime error', 'window.onerror', {
+        filename: e.filename || '',
+        lineno: e.lineno || 0,
+        colno: e.colno || 0
+      });
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      handleGlobalError_((e && e.reason) || 'Unhandled promise rejection', 'unhandledrejection');
+      if (e && e.preventDefault) e.preventDefault();
+    });
+  }
+  initGlobalErrorBoundary_();
+  window.safeExecute_ = safeExecute_;
+  window.handleGlobalError_ = handleGlobalError_;
+
   function updateMobileTabState_(pageId) {
     var bar = document.getElementById('mobile-tab-bar');
     if (!bar) return;
@@ -79,16 +189,16 @@
       window.location.hash = PAGE_HASH[id] || 'home';
       setTimeout(function(){ _navigating = false; }, 50);
     }
-    if (id === 'pg-dash')         loadDash();
-    if (id === 'pg-log')          initLogPage();
-    if (id === 'pg-home')         loadHome();
-    if (id === 'pg-history')      initHistoryPage();
-    if (id === 'pg-settings')     { initSettingsPage(); }
-    if (id === 'pg-appsettings')  loadAppSettings();
-    if (id === 'pg-cadence')      initCadencePage();
-    if (id === 'pg-addperson')    initAddPersonPage();
-    if (id === 'pg-analytics')    loadAnalytics();
-    if (id === 'pg-todos')         loadTodos();
+    if (id === 'pg-dash')         safeExecute_(function(){ return loadDash(); }, 'showPage:loadDash');
+    if (id === 'pg-log')          safeExecute_(function(){ return initLogPage(); }, 'showPage:initLogPage');
+    if (id === 'pg-home')         safeExecute_(function(){ return loadHome(); }, 'showPage:loadHome');
+    if (id === 'pg-history')      safeExecute_(function(){ return initHistoryPage(); }, 'showPage:initHistoryPage');
+    if (id === 'pg-settings')     { safeExecute_(function(){ return initSettingsPage(); }, 'showPage:initSettingsPage'); }
+    if (id === 'pg-appsettings')  safeExecute_(function(){ return loadAppSettings(); }, 'showPage:loadAppSettings');
+    if (id === 'pg-cadence')      safeExecute_(function(){ return initCadencePage(); }, 'showPage:initCadencePage');
+    if (id === 'pg-addperson')    safeExecute_(function(){ return initAddPersonPage(); }, 'showPage:initAddPersonPage');
+    if (id === 'pg-analytics')    safeExecute_(function(){ return loadAnalytics(); }, 'showPage:loadAnalytics');
+    if (id === 'pg-todos')        safeExecute_(function(){ return loadTodos(); }, 'showPage:loadTodos');
     if (id === 'pg-search') {
       setTimeout(function(){
         var inp = document.getElementById('search-page-input');

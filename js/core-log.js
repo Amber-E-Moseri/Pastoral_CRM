@@ -107,6 +107,7 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     if ((bsAction === 'Callback' || bsAction === 'Follow-up') && !ndt) {
       bsShowMsg('Please set a date for ' + bsAction + '.', 'error'); return;
     }
+    var quickTodos = aiAssist.todos || [];
     var payload = {
       personId: bsPid,
       fullName: bsName,
@@ -116,25 +117,23 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
       nextActionDateTime: ndt || null,
       channel: bsSource === 'who_to_call' ? 'Who to Call' : 'Call'
     };
+    if (quickTodos.length) {
+      payload._queuedTodos = quickTodos.map(function(t){ return { text: t }; });
+    }
     bsSaving = true;
     document.getElementById('bsheet-save-btn').disabled = true;
     bsShowMsg('Saving...', 'info');
     stopVoice();
 
-    var savePromise;
-    if (!navigator.onLine) {
-      queueOfflineCall(payload);
-      savePromise = Promise.resolve({ success: true, offline: true });
-    } else {
-      savePromise = apiPost('saveInteraction', { payload: payload });
-    }
+    var savePromise = (typeof saveInteractionWithOfflineFallback_ === 'function')
+      ? saveInteractionWithOfflineFallback_(payload)
+      : apiPost('saveInteraction', { payload: payload });
     savePromise.then(function(res) {
       bsSaving = false;
       if (res && res.success) {
         hapticTick_();
         _homeQuickStatsCache = null;
-        var quickTodos = aiAssist.todos || [];
-        if (quickTodos.length && res.interactionId) {
+        if (quickTodos.length && res.interactionId && !res.offline) {
           apiPost('saveTodos', { payload: {
             interactionId: res.interactionId,
             personId: bsPid,
@@ -142,8 +141,8 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
             todos: quickTodos.map(function(t){ return { text: t }; })
           } }).then(function(){ if (window.loadTodos && document.getElementById('pg-todos') && document.getElementById('pg-todos').classList.contains('active')) loadTodos(); }).catch(function(e){ console.warn('[Flock]', e); });
         }
-        var todoNote = quickTodos.length ? ' ' + quickTodos.length + ' action item' + (quickTodos.length > 1 ? 's' : '') + ' added.' : '';
-        bsShowMsg((res.offline ? 'Saved offline - will sync when back online.' : 'Call logged!') + todoNote, 'success');
+        var todoNote = quickTodos.length ? ' ' + quickTodos.length + ' action item' + (quickTodos.length > 1 ? 's' : '') + (res.offline ? ' queued.' : ' added.') : '';
+        bsShowMsg((res.offline ? 'Saved offline - will sync automatically when connection improves.' : 'Call logged!') + todoNote, 'success');
         if (bsResult === 'Reached' && bsAction === 'None') optimisticRemoveFromDash(bsPid);
         (window.runPostSaveRefresh ? runPostSaveRefresh() : Promise.resolve())
           .finally(function() {
@@ -315,22 +314,39 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
 
     window.addEventListener('online',  function() { updateOfflineBanner(); syncOfflineQueue(); });
     window.addEventListener('offline', function() { updateOfflineBanner(); });
+    window.addEventListener('flock:connection-state', function() { updateOfflineBanner(); });
     updateOfflineBanner();
   })();
 
   function updateOfflineBanner() {
     var banner = document.getElementById('offline-banner');
     if (!banner) return;
-    var isOff = !navigator.onLine;
-    banner.classList.toggle('on', isOff);
-    if (isOff) {
-      var qlen = _offlineQueue.length;
-      var failed = Object.keys(_offlineFailedById).length;
-      var txt = '';
-      if (qlen > 0) txt += qlen + ' queued';
-      if (failed > 0) txt += (txt ? ', ' : '') + failed + ' unsynced';
-      document.getElementById('offline-q-count').textContent = txt ? '(' + txt + ')' : '';
+    var state = (window.getConnectionState_ && getConnectionState_()) || { status: (!navigator.onLine ? 'offline' : 'good') };
+    var status = state.status || (!navigator.onLine ? 'offline' : 'good');
+    var qlen = _offlineQueue.length;
+    var failed = Object.keys(_offlineFailedById).length;
+    var txt = '';
+    if (qlen > 0) txt += qlen + ' queued';
+    if (failed > 0) txt += (txt ? ', ' : '') + failed + ' unsynced';
+
+    if (status === 'offline') {
+      banner.textContent = 'Offline - calls will sync when you reconnect ';
+      banner.classList.add('on');
+    } else if (status === 'unstable') {
+      banner.textContent = 'Connection unstable - saves may be queued automatically ';
+      banner.classList.add('on');
+    } else {
+      banner.classList.remove('on');
+      banner.textContent = 'Offline - calls will sync when you reconnect ';
     }
+
+    var countEl = document.getElementById('offline-q-count');
+    if (!countEl) {
+      countEl = document.createElement('span');
+      countEl.id = 'offline-q-count';
+      banner.appendChild(countEl);
+    }
+    countEl.textContent = txt ? '(' + txt + ')' : '';
   }
 
   function updateOfflineBadge() {
@@ -381,8 +397,9 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
       var queuedTodos = Array.isArray(queued._queuedTodos) ? queued._queuedTodos : [];
       delete payload._queuedAt;
       delete payload._queuedTodos;
-      apiPost('saveInteraction', { payload: payload })
+          apiPost('saveInteraction', { payload: payload })
         .then(function(res) {
+          var interactionId = (queued && queued._savedInteractionId) || (res && (res.interactionId || res.interactionID || res.id)) || '';
           if (!queuedTodos.length) {
             syncedKeys[queued._queuedAt] = true;
             delete _offlineFailedById[queued._queuedAt];
@@ -390,7 +407,23 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
             next();
             return;
           }
-          var interactionId = (res && (res.interactionId || res.interactionID || res.id)) || ('offline-' + Date.now());
+          if (!interactionId) {
+            failedCount++;
+            _offlineFailedById[queued._queuedAt] = 'Missing interaction id during sync.';
+            idx++;
+            next();
+            return;
+          }
+          if (queued._savedInteractionId !== interactionId) {
+            queued._savedInteractionId = interactionId;
+            for (var qi = 0; qi < _offlineQueue.length; qi++) {
+              if (_offlineQueue[qi] && _offlineQueue[qi]._queuedAt === queued._queuedAt) {
+                _offlineQueue[qi]._savedInteractionId = interactionId;
+                break;
+              }
+            }
+            try { localStorage.setItem('ct-offline-queue', JSON.stringify(_offlineQueue)); } catch(e) {}
+          }
           apiPost('saveTodos', { payload: {
             interactionId: interactionId,
             personId: payload.personId,
@@ -409,15 +442,23 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
           }).catch(function(e){
             console.warn('[Flock]', e);
             failedCount++;
-            _offlineFailedById[queued._queuedAt] = String(e);
+            if (window.isNetworkFailure_ && isNetworkFailure_(e)) {
+              _offlineFailedById[queued._queuedAt] = 'Network unstable - will retry.';
+            } else {
+              _offlineFailedById[queued._queuedAt] = String(e);
+            }
             idx++;
             next();
           });
         })
         .catch(function(e) {
           console.warn('[Flock]', e);
+          if (window.isNetworkFailure_ && isNetworkFailure_(e)) {
+            _offlineFailedById[queued._queuedAt] = 'Network unstable - will retry.';
+          } else {
+            _offlineFailedById[queued._queuedAt] = String(e);
+          }
           failedCount++;
-          _offlineFailedById[queued._queuedAt] = String(e);
           idx++;
           next();
         });

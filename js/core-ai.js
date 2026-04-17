@@ -1,8 +1,10 @@
 ﻿  window.Flock = window.Flock || {};
   var _aiParsed = null;       // holds last parsed result
+  var _aiSaving = false;
 
   function openAiAssist() {
     _aiParsed = null;
+    _aiSaving = false;
     document.getElementById('ai-input').value = '';
     document.getElementById('ai-input-msg').className = 'msg';
     document.getElementById('ai-parse-btn').disabled = false;
@@ -273,6 +275,7 @@
   }
 
   function confirmAiLog() {
+    if (_aiSaving) return;
     if (!_aiParsed) return;
     var p = _aiParsed;
     if (!p.personId) {
@@ -287,6 +290,7 @@
     var btn = document.getElementById('ai-confirm-btn');
     btn.disabled = true; btn.textContent = 'Saving...';
 
+    var aiTodos = extractTodosFromText(p.summary || '');
     var payload = {
       personId:            p.personId,
       fullName:            p.personName,
@@ -295,19 +299,24 @@
       summary:             p.summary   || '',
       nextActionDateTime:  p.nextActionDateTime || null
     };
+    if (aiTodos.length) {
+      payload._queuedTodos = aiTodos.map(function(t){ return { text: t }; });
+    }
 
     var savePromise = !navigator.onLine
       ? (queueOfflineCall(payload), Promise.resolve({ success:true, offline:true }))
-      : apiPost('saveInteraction', { payload: payload });
+      : (typeof saveInteractionWithOfflineFallback_ === 'function'
+          ? saveInteractionWithOfflineFallback_(payload)
+          : apiPost('saveInteraction', { payload: payload }));
 
+    _aiSaving = true;
     savePromise.then(function(res) {
+      _aiSaving = false;
       if (res && res.success) {
         hapticTick_();
         _homeQuickStatsCache = null;
         if (window.runPostSaveRefresh) runPostSaveRefresh().catch(function(e){ console.warn('[Flock]', e); });
-        // Extract action items from summary text and save as todos
-        var aiTodos = extractTodosFromText(p.summary || '');
-        if (aiTodos.length && res.interactionId) {
+        if (aiTodos.length && res.interactionId && !res.offline) {
           apiPost('saveTodos', { payload: {
             interactionId: res.interactionId,
             personId: p.personId,
@@ -315,17 +324,19 @@
             todos: aiTodos.map(function(t){ return { text: t }; })
           } }).then(function(){ loadTodos && loadTodos(); }).catch(function(e){ console.warn('[Flock]', e); });
         }
-        var todoNote = aiTodos.length ? ' ' + aiTodos.length + ' action item' + (aiTodos.length > 1 ? 's' : '') + ' added.' : '';
+        var todoNote = aiTodos.length ? ' ' + aiTodos.length + ' action item' + (aiTodos.length > 1 ? 's' : '') + (res.offline ? ' queued.' : ' added.') : '';
         document.getElementById('ai-success-sub').textContent =
           (res.offline ? 'Saved offline - ' : 'Call with ') + p.personName +
-          (res.offline ? ' will sync when reconnected.' : ' has been logged.') + todoNote;
+          (res.offline ? ' will sync automatically when connection improves.' : ' has been logged.') + todoNote;
         aiShowStep('success');
       } else {
+        _aiSaving = false;
         btn.disabled = false; btn.textContent = 'Log this call';
         var msg = document.getElementById('ai-confirm-msg');
         msg.textContent = 'Save failed: ' + (res && res.error ? res.error : 'Unknown'); msg.className = 'msg error';
       }
     }).catch(function(e) {
+      _aiSaving = false;
       btn.disabled = false; btn.textContent = 'Log this call';
       var msg = document.getElementById('ai-confirm-msg');
       var errText = (e && e.message) ? e.message : String(e);

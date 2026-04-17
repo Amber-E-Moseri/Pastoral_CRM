@@ -19,7 +19,37 @@
     var hh=String(d.getHours()).padStart(2,'0'), mi=String(d.getMinutes()).padStart(2,'0');
     return yyyy+'-'+mm+'-'+dd+'T'+hh+':'+mi;
   }
+  function dateOnlyValue(d){
+    if (!(d instanceof Date) || isNaN(d)) return '';
+    var yyyy=d.getFullYear(), mm=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+    return yyyy+'-'+mm+'-'+dd;
+  }
+  function timeOnlyValue(d){
+    if (!(d instanceof Date) || isNaN(d)) return '';
+    var hh=String(d.getHours()).padStart(2,'0'), mi=String(d.getMinutes()).padStart(2,'0');
+    return hh+':'+mi;
+  }
   function parseLocalDate(v){ return v ? new Date(v) : null; }
+  function splitDateTimeParts_(value){
+    var raw = String(value || '').trim();
+    if (!raw) return { date:'', time:'' };
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw)) {
+      return { date: raw.slice(0, 10), time: raw.slice(11, 16) };
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      return { date: raw, time: '' };
+    }
+    var d = new Date(raw);
+    if (isNaN(d.getTime())) return { date:'', time:'' };
+    return { date: dateOnlyValue(d), time: timeOnlyValue(d) };
+  }
+  function buildDateTime_(dateValue, timeValue){
+    var d = String(dateValue || '').trim();
+    var t = String(timeValue || '').trim();
+    if (!d) return null;
+    if (!t) t = '12:00';
+    return d + 'T' + t;
+  }
   function isWithinNextWeek(d){
     if (!(d instanceof Date) || isNaN(d)) return false;
     var now = new Date();
@@ -340,67 +370,188 @@
     if (byId('bs-msg')) { byId('bs-msg').textContent = 'Draft restored.'; byId('bs-msg').className = 'msg info'; }
   }
 
-  function matchPeople(desc, people){
-    var d = normalize(desc);
-    var dtoks = words(desc);
-    var ranked = (people || []).map(function(p){
-      var name = p.name || '';
-      var n = normalize(name);
-      var toks = words(name);
-      var score = 0;
-      if (!name) return { person:p, score:0 };
-      if (d.indexOf(n) >= 0) score = 0.98;
-      else {
-        if (toks[0] && d.indexOf(toks[0]) >= 0) score += 0.45;
-        if (toks.length > 1 && toks[toks.length-1] && d.indexOf(toks[toks.length-1]) >= 0) score += 0.35;
-        toks.forEach(function(t){ if (dtoks.indexOf(t) >= 0) score += 0.08; });
-        var fid = normalize(p.id || '');
-        if (fid && d.indexOf(fid) >= 0) score += 0.25;
-        if (p.fellowship && d.indexOf(normalize(p.fellowship)) >= 0) score += 0.18;
-      }
-      if (score > 1) score = 1;
-      return { person:p, score:score };
-    }).sort(function(a,b){ return b.score - a.score; });
-    var top = ranked[0] || null, second = ranked[1] || null;
-    var confidence = 'low';
-    if (top && top.score >= 0.70 && (!second || top.score - second.score >= 0.10)) confidence = 'high';
-    else if (top && top.score >= 0.40) confidence = 'medium';
-    return { confidence:confidence, top:top, suggestions:ranked.filter(function(x){ return x.score >= 0.35; }).slice(0,3) };
+  function escapeRegExp_(str){
+    return String(str || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
-
-  function detectResult(text){
-    var lower = String(text||'').toLowerCase();
-    if (/(left a message|left message|voicemail|went to voicemail)/.test(lower)) return 'Left Message';
-    if (/(no answer|didn.t answer|did not answer|didn.t pick|did not pick|couldn.t reach|could not reach|not available)/.test(lower)) return 'No Answer';
-    if (/(reschedul|moved the call|postponed)/.test(lower)) return 'Rescheduled Call';
-    if (/(spoke|talked|prayed|answered|picked up|we talked|we spoke|she said|he said|they said|shared|discussed|great call|good call)/.test(lower)) return 'Reached';
-    return 'No Answer';
+  function uniq_(arr){
+    var seen = {};
+    var out = [];
+    (arr || []).forEach(function(item){
+      var key = String(item || '').trim();
+      if (!key) return;
+      var norm = key.toLowerCase();
+      if (seen[norm]) return;
+      seen[norm] = true;
+      out.push(key);
+    });
+    return out;
   }
-  function detectAction(text){
-    var lower = String(text||'').toLowerCase();
-    if (/(call back|callback|call her back|call him back|call them back|ring back)/.test(lower)) return 'Callback';
-    if (/(follow.?up|check in|check on|next week|tomorrow|friday|next monday|later this week|later)/.test(lower)) return 'Follow-up';
-    return 'None';
+  function normalizeForAssist_(text){
+    var raw = String(text || '');
+    var contractions = {
+      "can't":"cannot","won't":"will not","don't":"do not","didn't":"did not","isn't":"is not","aren't":"are not",
+      "wasn't":"was not","weren't":"were not","couldn't":"could not","shouldn't":"should not","wouldn't":"would not",
+      "haven't":"have not","hasn't":"has not","hadn't":"had not","i'm":"i am","i've":"i have","i'll":"i will",
+      "we're":"we are","we've":"we have","we'll":"we will","they're":"they are","they've":"they have","they'll":"they will",
+      "he's":"he is","she's":"she is","it's":"it is","that's":"that is","there's":"there is","let's":"let us"
+    };
+    var lower = raw.toLowerCase().replace(/[\u2018\u2019]/g, "'");
+    Object.keys(contractions).forEach(function(c){
+      lower = lower.replace(new RegExp('\\b' + escapeRegExp_(c) + '\\b', 'g'), contractions[c]);
+    });
+    lower = lower.replace(/[^a-z0-9:/,\-\s]/g, ' ');
+    lower = lower.replace(/\s+/g, ' ').trim();
+    return lower;
   }
-  function detectDate(text){
+  function sentenceList_(text){
+    return String(text || '')
+      .replace(/\s+/g, ' ')
+      .split(/(?<=[.!?])\s+|\n+/)
+      .map(function(s){ return s.trim(); })
+      .filter(Boolean);
+  }
+  function extractTodosSmart_(text){
+    var actions = [];
+    var trigger = /\b(will|need to|must|should|plan to|going to|todo|to do|action item|remind|follow up|check in|send|text|email|pray|visit|call|share|schedule|prepare|review)\b/i;
+    sentenceList_(text).forEach(function(s){
+      if (s.length < 6 || s.length > 180) return;
+      if (!trigger.test(s)) return;
+      actions.push(s.replace(/^[\-*]\s*/, '').trim());
+    });
+    return uniq_(actions).slice(0, 6);
+  }
+  function detectResultSmart_(norm){
+    if (!norm) return { value:'', confidence:0 };
+    var leftMessageHints = ['left message','left a message','voicemail','voice mail','went to voicemail'];
+    var noAnswerHints = ['no answer','did not answer','did not pick up','not available','could not reach','missed call','no response'];
+    var reachedHints = ['spoke with','talked with','talked to','connected with','had a call','had a chat','answered','picked up','discussed','shared that'];
+    var rescheduledHints = ['rescheduled','postponed','moved the call','moved to next','moved to later'];
+    var has = function(list){ return list.some(function(p){ return norm.indexOf(p) >= 0; }); };
+    if (has(leftMessageHints)) return { value:'Left Message', confidence:0.97 };
+    if (has(noAnswerHints)) return { value:'No Answer', confidence:0.95 };
+    if (has(rescheduledHints)) return { value:'Rescheduled Call', confidence:0.88 };
+    if (has(reachedHints)) return { value:'Reached', confidence:0.9 };
+    return { value:'', confidence:0 };
+  }
+  function detectActionSmart_(norm){
+    if (!norm) return { value:'', confidence:0 };
+    var callbackHints = ['call back','callback','ring back','phone back','call me back','call them back','call her back','call him back'];
+    var followUpHints = ['follow up','check in','check on','touch base','reconnect','reach out','circle back','send','email','text','visit','next week','tomorrow','this friday','next monday','in 2 days','in 3 days','in a week'];
+    var has = function(list){ return list.some(function(p){ return norm.indexOf(p) >= 0; }); };
+    if (has(callbackHints)) return { value:'Callback', confidence:0.9 };
+    if (has(followUpHints)) return { value:'Follow-up', confidence:0.82 };
+    return { value:'', confidence:0 };
+  }
+  function detectDateSmart_(rawText, normText){
+    var parsed = null;
+    var confidence = 0;
     try {
-      var results = chrono.parse(text, new Date(), { forwardDate:true });
-      if (results && results.length) {
-        var d = results[0].start.date();
-        if (d && !isNaN(d)) {
-          if (!results[0].start.isCertain('hour')) d.setHours(10,0,0,0);
-          return d;
+      if (typeof chrono !== 'undefined' && chrono.parse) {
+        var results = chrono.parse(rawText, new Date(), { forwardDate:true });
+        if (results && results.length) {
+          parsed = results[0].start.date();
+          if (parsed && !isNaN(parsed.getTime())) {
+            if (!results[0].start.isCertain('hour')) parsed.setHours(10, 0, 0, 0);
+            confidence = results[0].start.isCertain('day') ? 0.82 : 0.65;
+            return { date: parsed, confidence: confidence };
+          }
         }
       }
     } catch(e){}
-    // Manual fallback for "in N week(s)" / "N weeks"
-    var weekMatch = String(text||'').match(/\bin\s+(\d+|two|three|four)\s+weeks?\b/i) ||
-                    String(text||'').match(/(\d+|two|three|four)\s+weeks?\s+(from now|away|later)/i);
-    if (weekMatch) {
-      var num = {'two':2,'three':3,'four':4}[String(weekMatch[1]).toLowerCase()] || parseInt(weekMatch[1],10) || 2;
-      var d2 = new Date(); d2.setDate(d2.getDate() + num*7); d2.setHours(10,0,0,0); return d2;
+    var relativeMatch = normText.match(/\bin\s+(\d{1,2})\s+days?\b/);
+    if (relativeMatch) {
+      parsed = new Date();
+      parsed.setDate(parsed.getDate() + parseInt(relativeMatch[1], 10));
+      parsed.setHours(10, 0, 0, 0);
+      return { date: parsed, confidence: 0.6 };
     }
-    return null;
+    if (/\btomorrow\b/.test(normText)) return { date: tomorrowDate(), confidence: 0.74 };
+    if (/\bnext week\b/.test(normText)) return { date: nextWeekDate(), confidence: 0.6 };
+    if (/\bthis friday\b|\bfriday\b/.test(normText)) return { date: thisFridayDate(), confidence: 0.58 };
+    return { date: null, confidence: 0 };
+  }
+  function matchPeople(desc, people){
+    var raw = String(desc || '');
+    var normalizedDesc = normalizeForAssist_(raw);
+    var descTokens = words(normalizedDesc).filter(function(t){ return t.length > 2; });
+    var ranked = (people || []).map(function(p){
+      var name = String((p && p.name) || '').trim();
+      if (!name) return { person:p, score:0 };
+      var score = 0;
+      var nameNorm = normalizeForAssist_(name);
+      var nameTokens = words(nameNorm).filter(function(t){ return t.length > 2; });
+      if (nameNorm && normalizedDesc.indexOf(nameNorm) >= 0) score += 0.78;
+      if (nameTokens.length >= 2) {
+        var fullRe = new RegExp('\\b' + nameTokens.map(escapeRegExp_).join('\\s+') + '\\b', 'i');
+        if (fullRe.test(raw)) score += 0.24;
+      }
+      nameTokens.forEach(function(tok){
+        if (descTokens.indexOf(tok) >= 0) score += 0.09;
+      });
+      if (nameTokens[0]) {
+        var firstRe = new RegExp('\\b' + escapeRegExp_(nameTokens[0]) + '\\b', 'i');
+        if (firstRe.test(raw)) score += 0.08;
+      }
+      var idNorm = normalizeForAssist_(p && p.id ? p.id : '');
+      if (idNorm && normalizedDesc.indexOf(idNorm) >= 0) score += 0.26;
+      var fellowNorm = normalizeForAssist_(p && p.fellowship ? p.fellowship : '');
+      if (fellowNorm && normalizedDesc.indexOf(fellowNorm) >= 0) score += 0.16;
+      if (score > 1) score = 1;
+      return { person:p, score:score };
+    }).sort(function(a,b){ return b.score - a.score; });
+    var top = ranked[0] || null;
+    var second = ranked[1] || null;
+    var confidence = 'low';
+    if (top && top.score >= 0.78 && (!second || (top.score - second.score) >= 0.12)) confidence = 'high';
+    else if (top && top.score >= 0.5) confidence = 'medium';
+    return {
+      confidence: confidence,
+      top: top,
+      suggestions: ranked.filter(function(x){ return x.score >= 0.35; }).slice(0, 4),
+      score: top ? top.score : 0
+    };
+  }
+  function parseSmartAssist_(text, people){
+    var rawText = String(text || '').trim();
+    var normalized = normalizeForAssist_(rawText);
+    var resultMatch = detectResultSmart_(normalized);
+    var actionMatch = detectActionSmart_(normalized);
+    var dateMatch = detectDateSmart_(rawText, normalized);
+    var personMatch = matchPeople(rawText, people || []);
+    var todos = extractTodosSmart_(rawText);
+    var nextAction = actionMatch.value;
+    if (!nextAction && dateMatch.date) nextAction = 'Follow-up';
+    var personId = '';
+    var personName = '';
+    if (personMatch && personMatch.confidence === 'high' && personMatch.top && personMatch.top.person) {
+      personId = personMatch.top.person.id;
+      personName = personMatch.top.person.name || personMatch.top.person.id || '';
+    }
+    return {
+      personName: personName || '',
+      personId: personId || '',
+      result: resultMatch.value || '',
+      nextAction: nextAction || '',
+      nextActionDateTime: dateMatch.date ? dtLocalValue(dateMatch.date) : '',
+      summary: rawText,
+      todos: todos,
+      confidence: {
+        person: Math.max(0, Math.min(1, personMatch.score || 0)),
+        result: resultMatch.confidence || 0,
+        nextAction: actionMatch.confidence || 0,
+        date: dateMatch.confidence || 0
+      },
+      matchConfidence: personMatch.confidence || 'low',
+      suggestions: personMatch.suggestions || []
+    };
+  }
+  function inferAssistFromTextLocal(text){
+    var parsed = parseSmartAssist_(text, (window.allPeople || []));
+    return {
+      nextAction: parsed.nextAction || 'None',
+      nextActionDateTime: parsed.nextActionDateTime || '',
+      todos: parsed.todos || []
+    };
   }
   function buildSummary(text){
     return String(text || '').trim();
@@ -411,19 +562,38 @@
     if (dateRow && !byId('ai-date-edit')) {
       dateRow.classList.add('ai-editable-card');
       dateRow.insertAdjacentHTML('beforeend', '' +
-        '<div id="ai-date-edit" class="ai-inline-edit">' +
-          '<div class="ai-mini-label">Change date</div>' +
-          '<input type="datetime-local" id="ai-date-input">' +
+        '<div id="ai-date-edit" class="ai-inline-edit ai-date-edit open">' +
+          '<div class="ai-mini-label">Follow-up date and time</div>' +
+          '<div class="ai-date-grid">' +
+            '<div class="ai-date-cell">' +
+              '<label class="ai-mini-label ai-mini-label-inline" for="ai-date-input">Date</label>' +
+              '<input type="date" id="ai-date-input">' +
+            '</div>' +
+            '<div class="ai-date-cell">' +
+              '<label class="ai-mini-label ai-mini-label-inline" for="ai-time-input">Time (optional)</label>' +
+              '<input type="time" id="ai-time-input" step="900">' +
+            '</div>' +
+          '</div>' +
           '<div class="ai-date-shortcuts">' +
             '<button class="ai-date-chip" type="button" data-action="ai-date-shortcut" data-shortcut="tomorrow">Tomorrow</button>' +
             '<button class="ai-date-chip" type="button" data-action="ai-date-shortcut" data-shortcut="friday">This Friday</button>' +
             '<button class="ai-date-chip" type="button" data-action="ai-date-shortcut" data-shortcut="nextweek">Next week</button>' +
-            '<button class="ai-date-chip" type="button" data-action="ai-date-shortcut" data-shortcut="twoweeks">2 Weeks</button>' +
+            '<button class="ai-date-chip" type="button" data-action="ai-date-shortcut" data-shortcut="twoweeks">In 2 weeks</button>' +
+            '<button class="ai-date-chip" type="button" data-action="ai-date-clear">Clear</button>' +
           '</div>' +
-          '' +
+          '<div class="ai-helper-note" id="ai-date-helper">Choose a date/time or use a shortcut.</div>' +
         '</div>');
-      dateRow.addEventListener('click', function(e){ if (e.target.closest('#ai-date-edit')) return; byId('ai-date-edit').classList.toggle('open'); });
-      byId('ai-date-input').addEventListener('input', function(){ if (!window._aiParsed) return; window._aiParsed.nextActionDateTime = this.value; if (!window._aiParsed.nextAction || window._aiParsed.nextAction === 'None') window._aiParsed.nextAction = 'Follow-up'; renderAiDate(); saveAiDraft(); });
+      var onDatePartChange = function(){
+        if (!window._aiParsed) return;
+        var dVal = byId('ai-date-input') ? byId('ai-date-input').value : '';
+        var tVal = byId('ai-time-input') ? byId('ai-time-input').value : '';
+        window._aiParsed.nextActionDateTime = buildDateTime_(dVal, tVal) || '';
+        if (dVal && (!window._aiParsed.nextAction || window._aiParsed.nextAction === 'None')) window._aiParsed.nextAction = 'Follow-up';
+        renderAiDate();
+        saveAiDraft();
+      };
+      byId('ai-date-input').addEventListener('input', onDatePartChange);
+      byId('ai-time-input').addEventListener('input', onDatePartChange);
     }
     var personWrap = byId('ai-person-override');
     if (personWrap && !byId('ai-conf-edit-person')) {
@@ -439,14 +609,18 @@
   }
 
   function renderAiDate(){
-    var row = byId('ai-conf-date-row'), out = byId('ai-conf-date'), input = byId('ai-date-input');
+    var row = byId('ai-conf-date-row'), out = byId('ai-conf-date'), dateInput = byId('ai-date-input'), timeInput = byId('ai-time-input'), edit = byId('ai-date-edit');
     if (!row || !out || !window._aiParsed) return;
     var a = window._aiParsed.nextAction || 'None';
     var hasAction = (a === 'Callback' || a === 'Follow-up');
     row.style.display = hasAction ? 'block' : 'none';
+    if (edit) edit.classList.add('open');
+    var parts = splitDateTimeParts_(window._aiParsed.nextActionDateTime || '');
     var d = parseLocalDate(window._aiParsed.nextActionDateTime);
     out.textContent = d ? formatResolvedDate(d) : 'No date selected';
-    if (input) input.value = window._aiParsed.nextActionDateTime || '';
+    if (dateInput) dateInput.value = parts.date || '';
+    if (timeInput) timeInput.value = parts.time || '';
+    updateDateHelperState_();
   }
 
   window.aiApplyDateShortcut = function(type){
@@ -454,7 +628,49 @@
     var d = type === 'tomorrow' ? tomorrowDate() : type === 'friday' ? thisFridayDate() : type === 'twoweeks' ? twoWeeksDate() : nextWeekDate();
     window._aiParsed.nextAction = window._aiParsed.nextAction === 'Callback' ? 'Callback' : 'Follow-up';
     window._aiParsed.nextActionDateTime = dtLocalValue(d);
+    var dateInput = byId('ai-date-input');
+    var timeInput = byId('ai-time-input');
+    if (dateInput) dateInput.value = dateOnlyValue(d);
+    if (timeInput) timeInput.value = timeOnlyValue(d);
     renderAiDate();
+    saveAiDraft();
+  };
+
+  function updateDateHelperState_(){
+    var helper = byId('ai-date-helper');
+    var row = byId('ai-conf-date-row');
+    var dateInput = byId('ai-date-input');
+    var timeInput = byId('ai-time-input');
+    if (!helper || !row) return;
+    var hasAction = !!(window._aiParsed && (window._aiParsed.nextAction === 'Callback' || window._aiParsed.nextAction === 'Follow-up'));
+    var hasDate = !!(dateInput && dateInput.value);
+    var hasTime = !!(timeInput && timeInput.value);
+    row.classList.remove('ai-date-required');
+    if (!hasAction) {
+      helper.textContent = 'Select a follow-up date';
+      return;
+    }
+    if (!hasDate) {
+      helper.textContent = 'Select a follow-up date';
+      row.classList.add('ai-date-required');
+      return;
+    }
+    if (hasDate && !hasTime) {
+      helper.textContent = 'Time optional';
+      return;
+    }
+    helper.textContent = 'Follow-up scheduled';
+  }
+
+  window.aiClearDate = function(){
+    if (!window._aiParsed) return;
+    window._aiParsed.nextActionDateTime = '';
+    var dateInput = byId('ai-date-input');
+    var timeInput = byId('ai-time-input');
+    if (dateInput) dateInput.value = '';
+    if (timeInput) timeInput.value = '';
+    renderAiDate();
+    if (dateInput) setTimeout(function(){ dateInput.focus(); }, 20);
     saveAiDraft();
   };
 
@@ -524,30 +740,37 @@
       : (window.getPeople ? window.getPeople() : apiFetch('people'));
     peoplePromise.then(function(people){
       if (Array.isArray(people) && people.length) window.allPeople = people;
-      var result = detectResult(desc);
-      var nextAction = detectAction(desc);
-      var parsedDate = detectDate(desc);
-      if (parsedDate && nextAction === 'None') nextAction = 'Follow-up';
-      var match = matchPeople(desc, people || []);
+      var parsed = parseSmartAssist_(desc, people || []);
       window._aiParsed = {
         rawText: desc,
-        personId: match.confidence === 'high' ? match.top.person.id : null,
-        personName: match.confidence === 'high' ? (match.top.person.name || match.top.person.id) : '',
-        result: result,
-        nextAction: nextAction,
-        nextActionDateTime: parsedDate ? dtLocalValue(parsedDate) : '',
+        personName: parsed.personName || '',
+        personId: parsed.personId || null,
+        result: parsed.result || '',
+        nextAction: parsed.nextAction || '',
+        nextActionDateTime: parsed.nextActionDateTime || '',
         summary: buildSummary(desc),
-        matchConfidence: match.confidence,
-        suggestions: match.suggestions || []
+        todos: parsed.todos || [],
+        confidence: parsed.confidence || {},
+        matchConfidence: parsed.matchConfidence || 'low',
+        suggestions: parsed.suggestions || []
       };
       ensureAiEditors();
       if (byId('ai-conf-summary-row')) byId('ai-conf-summary-row').style.display = 'block';
       if (byId('ai-conf-summary')) byId('ai-conf-summary').value = window._aiParsed.summary || '';
-      document.querySelectorAll('#ai-result-chips .ai-rc').forEach(function(b){ b.className='ai-rc'; if (b.getAttribute('data-r') === result) aiPickResult(b); });
-      document.querySelectorAll('#ai-action-chips .ai-rc').forEach(function(b){ b.className='ai-rc'; if (b.getAttribute('data-a') === nextAction) b.className='ai-rc sel-action'; });
+      document.querySelectorAll('#ai-result-chips .ai-rc').forEach(function(b){ b.className='ai-rc'; if (window._aiParsed.result && b.getAttribute('data-r') === window._aiParsed.result) aiPickResult(b); });
+      document.querySelectorAll('#ai-action-chips .ai-rc').forEach(function(b){ b.className='ai-rc'; if (window._aiParsed.nextAction && b.getAttribute('data-a') === window._aiParsed.nextAction) b.className='ai-rc sel-action'; });
       renderAiSuggestions(window._aiParsed);
       renderAiDate();
       aiShowStep('confirm');
+      if (byId('ai-input-msg')) {
+        if (!window._aiParsed.result || (window._aiParsed.nextAction === 'Follow-up' && !window._aiParsed.nextActionDateTime)) {
+          byId('ai-input-msg').textContent = 'Parsed with low confidence. Please review before saving.';
+          byId('ai-input-msg').className = 'msg info';
+        } else {
+          byId('ai-input-msg').className = 'msg';
+          byId('ai-input-msg').textContent = '';
+        }
+      }
       saveAiDraft();
       if (btn) { btn.disabled=false; btn.textContent='Quick Parse'; }
     }).catch(function(e){ if (btn) { btn.disabled=false; btn.textContent='Quick Parse'; } var msg = byId('ai-input-msg'); if (msg) { msg.textContent='Could not parse right now. ' + String(e); msg.className='msg error'; } });
@@ -571,6 +794,12 @@
     document.querySelectorAll('#ai-action-chips .ai-rc').forEach(function(b){ b.className='ai-rc'; });
     btn.className='ai-rc sel-action';
     renderAiDate();
+    if (a === 'Callback' || a === 'Follow-up') {
+      setTimeout(function(){
+        var input = byId('ai-date-input');
+        if (input) input.focus();
+      }, 50);
+    }
     saveAiDraft();
   };
 
@@ -582,12 +811,21 @@
       var msg = byId('ai-confirm-msg'); if (msg) { msg.textContent='Please choose the person before saving.'; msg.className='msg error'; } return;
     }
     var summaryText = byId('ai-conf-summary') ? byId('ai-conf-summary').value.trim() : (p.summary || '');
-    var aiAssist = inferAssistFromText(summaryText);
+    var aiAssist = inferAssistFromTextLocal(summaryText);
     if ((!p.nextAction || p.nextAction === 'None') && aiAssist.nextAction !== 'None') p.nextAction = aiAssist.nextAction;
     if (!p.nextActionDateTime && aiAssist.nextActionDateTime && (p.nextAction === 'Callback' || p.nextAction === 'Follow-up')) {
       p.nextActionDateTime = aiAssist.nextActionDateTime;
     }
+    if (p.nextAction === 'Callback' || p.nextAction === 'Follow-up') {
+      var dateVal = byId('ai-date-input') ? byId('ai-date-input').value : '';
+      var timeVal = byId('ai-time-input') ? byId('ai-time-input').value : '';
+      var builtDt = buildDateTime_(dateVal, timeVal);
+      if (builtDt) p.nextActionDateTime = builtDt;
+    }
     if ((p.nextAction === 'Callback' || p.nextAction === 'Follow-up') && !p.nextActionDateTime) {
+      var row = byId('ai-conf-date-row');
+      if (row) row.classList.add('ai-date-required');
+      updateDateHelperState_();
       var msg2 = byId('ai-confirm-msg'); if (msg2) { msg2.textContent='Please choose a follow-up date.'; msg2.className='msg error'; } return;
     }
     var payload = {
@@ -598,15 +836,22 @@
       summary: summaryText,
       nextActionDateTime: p.nextActionDateTime || null
     };
+    if (Array.isArray(aiAssist.todos) && aiAssist.todos.length) {
+      payload._queuedTodos = aiAssist.todos.map(function(t){ return { text: t }; });
+    }
     var btn = byId('ai-confirm-btn'); if (btn) { btn.disabled=true; btn.textContent='Saving...'; }
     _aiConfirmInFlight = true;
-    var savePromise = !navigator.onLine ? (queueOfflineCall(payload), Promise.resolve({ success:true, offline:true })) : apiPost('saveInteraction', { payload: payload });
+    var savePromise = (typeof saveInteractionWithOfflineFallback_ === 'function')
+      ? saveInteractionWithOfflineFallback_(payload)
+      : (!navigator.onLine
+          ? (queueOfflineCall(payload), Promise.resolve({ success:true, offline:true }))
+          : apiPost('saveInteraction', { payload: payload }));
     savePromise.then(function(res){
       _aiConfirmInFlight = false;
       if (res && res.success) {
         if (window.runPostSaveRefresh) runPostSaveRefresh().catch(function(e){ console.warn('[Flock]', e); });
         var aiTodos = aiAssist.todos || [];
-        if (aiTodos.length && res.interactionId) {
+        if (aiTodos.length && res.interactionId && !res.offline) {
           apiPost('saveTodos', { payload: {
             interactionId: res.interactionId,
             personId: payload.personId,
@@ -701,6 +946,7 @@
     if (action === 'save-your-name') { saveYourName(); return; }
     if (action === 'save-app-setting') { saveAppSetting(actionEl.getAttribute('data-key') || ''); return; }
     if (action === 'ai-date-shortcut') { aiApplyDateShortcut(actionEl.getAttribute('data-shortcut') || 'tomorrow'); return; }
+    if (action === 'ai-date-clear') { aiClearDate(); return; }
     if (action === 'ai-choose-person') { aiChoosePerson(actionEl.getAttribute('data-pid') || ''); return; }
   });
 

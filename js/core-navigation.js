@@ -284,7 +284,18 @@
     var sig = JSON.stringify(payload);
     if (sig === lastSig && (Date.now() - lastAt) < 15000) { showMsg('This call was just saved - tap "Log another call" to continue.', 'info'); return; }
     setSaving(true); showMsg('Saving...', 'info');
-    apiPost('saveInteraction', { payload: payload })
+    if (window.flushPendingLogTodoItem) window.flushPendingLogTodoItem();
+    var todoItems = (window.getTodoItems ? window.getTodoItems() : []);
+    if (todoItems.length) {
+      payload._queuedTodos = todoItems.map(function(t){
+        if (t && typeof t === 'object') return { text: String(t.text || ''), dueDate: String(t.dueDate || '') };
+        return { text: String(t || ''), dueDate: '' };
+      }).filter(function(t){ return String(t.text || '').trim(); });
+    }
+    var savePromise = (typeof saveInteractionWithOfflineFallback_ === 'function')
+      ? saveInteractionWithOfflineFallback_(payload)
+      : apiPost('saveInteraction', { payload: payload });
+    savePromise
       .then(function(res){
         setSaving(false);
         if (res && res.success) {
@@ -292,10 +303,7 @@
           _homeQuickStatsCache = null;
           if (window.runPostSaveRefresh) runPostSaveRefresh().catch(function(e){ console.warn('[Flock]', e); });
           lastSig = sig; lastAt = Date.now();
-          // Capture pending action item text, then save action items if any
-          if (window.flushPendingLogTodoItem) window.flushPendingLogTodoItem();
-          var todoItems = (window.getTodoItems ? window.getTodoItems() : []);
-          if (todoItems.length) {
+          if (todoItems.length && !res.offline) {
             var interactionId = (res && (res.interactionId || res.interactionID || res.id)) || ('manual-' + Date.now());
             apiPost('saveTodos', { payload: {
               interactionId: interactionId,
@@ -310,14 +318,22 @@
             } }).catch(function(e){ console.warn('[Flock]', e); });
           }
           document.getElementById('log-form').style.display = 'none';
-          document.getElementById('success-sub').textContent = 'Call with ' + name + ' has been saved.' + (todoItems.length ? ' ' + todoItems.length + ' action item' + (todoItems.length > 1 ? 's' : '') + ' added.' : '');
+          if (res.offline) {
+            document.getElementById('success-sub').textContent = 'Saved offline - will sync automatically when connection improves.' + (todoItems.length ? ' ' + todoItems.length + ' action item' + (todoItems.length > 1 ? 's' : '') + ' queued.' : '');
+          } else {
+            document.getElementById('success-sub').textContent = 'Call with ' + name + ' has been saved.' + (todoItems.length ? ' ' + todoItems.length + ' action item' + (todoItems.length > 1 ? 's' : '') + ' added.' : '');
+          }
           document.getElementById('success-screen').classList.add('on');
           document.getElementById('save-bar').style.display = 'none';
         } else {
           showMsg('Save failed: ' + (res && res.error ? res.error : 'Unknown error.'), 'error');
         }
       })
-      .catch(function(e){ setSaving(false); showMsg('Error: ' + String(e), 'error'); });
+      .catch(function(e){
+        setSaving(false);
+        var errText = (e && e.message) ? e.message : String(e);
+        showMsg('Error: ' + errText, 'error');
+      });
   }
 
   function resetLog() {

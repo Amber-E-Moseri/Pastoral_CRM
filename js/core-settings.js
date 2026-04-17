@@ -411,6 +411,17 @@
   window.onload = function() {
     var hash = window.location.hash.replace('#', '');
     var pageId = (hash && HASH_MAP[hash]) ? HASH_MAP[hash] : 'pg-home';
+    if (window.safeExecute_) {
+      safeExecute_(function(){ initBottomSheetSwipe_(); }, 'window.onload:initBottomSheetSwipe');
+      safeExecute_(function(){
+        return loadGuidePagePartial().then(function() {
+          return safeExecute_(function(){ return showPage(pageId, false); }, 'window.onload:showPage');
+        }, function() {
+          return safeExecute_(function(){ return showPage(pageId, false); }, 'window.onload:showPage');
+        });
+      }, 'window.onload:loadGuidePagePartial');
+      return;
+    }
     initBottomSheetSwipe_();
     loadGuidePagePartial().then(function() {
       showPage(pageId, false);
