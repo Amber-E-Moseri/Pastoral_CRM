@@ -8,15 +8,6 @@ A lightweight relationship management system built on Google Apps Script and Goo
 
 ## Screenshots
 
-### 📊 Dashboard — Overview & Activity
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/12f47477-15f6-4256-bad5-a77278013f13" width="800"/>
-</p>
-
-A high-level view of activity, recent interactions, and overall engagement trends.
-
----
-
 ### 🧠 AI-Assisted Call Logging
 <p align="center">
   <img src="https://github.com/user-attachments/assets/e6f7257b-593c-4777-a7c0-6854351a87dd" width="800"/>
