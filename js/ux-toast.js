@@ -1,9 +1,9 @@
-
+﻿
 (function(){
   function todayKey(){ return new Date().toISOString().slice(0,10); }
 
   function showToast(msg){
-    var el = $('ux-toast'); if (!el) return;
+    var el = document.getElementById('ux-toast'); if (!el) return;
     el.textContent = msg;
     el.classList.add('on');
     clearTimeout(window.__uxToastTimer);
@@ -17,7 +17,7 @@
 
   function updateDailyProgress(count){
     var n = (count !== undefined) ? count : (window.__todayLoggedCount || 0);
-    var dc = $('dash-today-count');
+    var dc = document.getElementById('dash-today-count');
     if (dc) {
       dc.textContent = n + ' call' + (n === 1 ? '' : 's') + ' logged today';
       dc.style.color = '#2f7a4c';
@@ -45,8 +45,8 @@
     updateDailyProgress();
   };
 
-  function successScreenVisible(){ return $('success-screen') && $('success-screen').classList.contains('on'); }
-  function aiSuccessVisible(){ return $('ai-step-success') && $('ai-step-success').style.display !== 'none'; }
+  function successScreenVisible(){ return document.getElementById('success-screen') && document.getElementById('success-screen').classList.contains('on'); }
+  function aiSuccessVisible(){ return document.getElementById('ai-step-success') && document.getElementById('ai-step-success').style.display !== 'none'; }
 
   var _oldSaveCall = window.saveCall;
   window.saveCall = function(){
@@ -91,7 +91,7 @@
     var offline = !navigator.onLine;
     var ret = _oldSaveBsheet ? _oldSaveBsheet() : null;
     setTimeout(function(){
-      var msg = $('bs-msg') ? $('bs-msg').textContent : '';
+      var msg = document.getElementById('bs-msg') ? document.getElementById('bs-msg').textContent : '';
       if (/saved/i.test(msg)) {
         window.__todayLoggedCount = (window.__todayLoggedCount || 0) + 1;
         updateDailyProgress();
@@ -120,7 +120,7 @@
   window.toggleDailySummary = function(on){
     if (_oldToggleDailySummary) _oldToggleDailySummary(on);
     setTimeout(function(){
-      showToast(on ? 'Notifications enabled - you’ll get one daily summary' : 'Notifications turned off');
+      showToast(on ? 'Notifications enabled - youâ€™ll get one daily summary' : 'Notifications turned off');
     }, 180);
   };
 
@@ -131,9 +131,9 @@
       var hadQueued = Array.isArray(window._offlineQueue) && window._offlineQueue.length > 0;
       var res = _oldSyncOfflineQueue();
       if (hadQueued) {
-        showToast('Syncing offline saves…');
+        showToast('Syncing offline savesâ€¦');
         setTimeout(function(){
-          if (Array.isArray(window._offlineQueue) && window._offlineQueue.length === 0) showToast('Synced ✓');
+          if (Array.isArray(window._offlineQueue) && window._offlineQueue.length === 0) showToast('Synced âœ“');
         }, 1200);
       }
       return res;
@@ -142,16 +142,16 @@
 
   // Back navigation consistency: close sheets first
   function anySheetOpen(){
-    return ($('bsheet-backdrop') && $('bsheet-backdrop').classList.contains('open')) ||
-           ($('ai-backdrop') && $('ai-backdrop').classList.contains('open')) ||
-           ($('edit-modal-backdrop') && $('edit-modal-backdrop').classList.contains('open')) ||
-           ($('notes-modal-backdrop') && $('notes-modal-backdrop').classList.contains('open'));
+    return (document.getElementById('bsheet-backdrop') && document.getElementById('bsheet-backdrop').classList.contains('open')) ||
+           (document.getElementById('ai-backdrop') && document.getElementById('ai-backdrop').classList.contains('open')) ||
+           (document.getElementById('edit-modal-backdrop') && document.getElementById('edit-modal-backdrop').classList.contains('open')) ||
+           (document.getElementById('notes-modal-backdrop') && document.getElementById('notes-modal-backdrop').classList.contains('open'));
   }
   function closeTopSheet(){
-    if ($('ai-backdrop') && $('ai-backdrop').classList.contains('open') && window.closeAiAssist) { closeAiAssist(); return true; }
-    if ($('bsheet-backdrop') && $('bsheet-backdrop').classList.contains('open') && window.closeBsheet) { closeBsheet(); return true; }
-    if ($('edit-modal-backdrop') && $('edit-modal-backdrop').classList.contains('open') && window.closeEditModal) { closeEditModal(); return true; }
-    if ($('notes-modal-backdrop') && $('notes-modal-backdrop').classList.contains('open') && window.closeNotesModal) { closeNotesModal(); return true; }
+    if (document.getElementById('ai-backdrop') && document.getElementById('ai-backdrop').classList.contains('open') && window.closeAiAssist) { closeAiAssist(); return true; }
+    if (document.getElementById('bsheet-backdrop') && document.getElementById('bsheet-backdrop').classList.contains('open') && window.closeBsheet) { closeBsheet(); return true; }
+    if (document.getElementById('edit-modal-backdrop') && document.getElementById('edit-modal-backdrop').classList.contains('open') && window.closeEditModal) { closeEditModal(); return true; }
+    if (document.getElementById('notes-modal-backdrop') && document.getElementById('notes-modal-backdrop').classList.contains('open') && window.closeNotesModal) { closeNotesModal(); return true; }
     return false;
   }
   window.addEventListener('hashchange', function(e){
@@ -167,3 +167,4 @@
 
   document.addEventListener('DOMContentLoaded', function(){ resetDailyCountIfNeeded(); });
 })();
+

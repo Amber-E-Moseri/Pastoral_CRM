@@ -1,13 +1,12 @@
-
 (function(){
-  function $(id){ return document.getElementById(id); }
+  function byId(id){ return document.getElementById(id); }
   var _oldRenderCadence = window.renderCadence;
   window.renderCadence = function(list){
-    var el = $('cad-list');
+    var el = byId('cad-list');
     if (!el) return;
     if (!list || !list.length) { el.innerHTML = '<div class="hist-empty">No contacts match.</div>'; return; }
     el.innerHTML = list.map(function(p) {
-      var sub = [p.role, p.fellowship].filter(Boolean).join(' · ');
+      var sub = [p.role, p.fellowship].filter(Boolean).join(' - ');
       var pid = esc(p.id);
       var days = parseInt(p.cadenceDays, 10) || 28;
       var isActive = p.active !== false;
@@ -31,7 +30,7 @@
           '<span class="cad-days-label">days</span>' +
           '<button class="cad-save" id="csave-' + pid + '" onclick="saveCad(\'' + pid + '\')">Save</button>' +
           '<span class="cad-status" id="cstat-' + pid + '"></span>' +
-          '<button class="cad-edit" onclick="openEditModal(\'' + pid + '\')" title="Edit details" style="margin-left:auto;">✎</button>' +
+          '<button class="cad-edit" onclick="openEditModal(\'' + pid + '\')" title="Edit details" style="margin-left:auto;">Edit</button>' +
         '</div>' +
       '</div>';
     }).join('');

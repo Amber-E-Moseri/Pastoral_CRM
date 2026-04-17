@@ -1,5 +1,20 @@
-﻿  window.Flock = window.Flock || {};
+  window.Flock = window.Flock || {};
   var _apiGetInFlight = {};
+
+  function getGetTimeoutMs_(action) {
+    if (action === 'duePeople') return 35000;
+    if (action === 'getAnalytics') return 30000;
+    return 15000;
+  }
+
+  function getPostTimeoutMs_(action) {
+    if (action === 'saveInteraction') return 35000;
+    if (action === 'saveTodos') return 25000;
+    if (action === 'addPerson') return 25000;
+    if (action === 'editPerson') return 25000;
+    return 20000;
+  }
+
   function apiFetch(action, params) {
     if (!API) return Promise.reject(new Error('API URL is not configured.'));
     var url = API + '?action=' + action;
@@ -10,7 +25,7 @@
     }
     if (_apiGetInFlight[url]) return _apiGetInFlight[url];
     var controller = new AbortController();
-    var timeoutId = setTimeout(function() { controller.abort(); }, 15000);
+    var timeoutId = setTimeout(function() { controller.abort(); }, getGetTimeoutMs_(action));
     _apiGetInFlight[url] = fetch(url, { method: 'GET', redirect: 'follow', signal: controller.signal })
       .then(function(r) {
         clearTimeout(timeoutId);
@@ -39,7 +54,7 @@
     if (!API) return Promise.reject(new Error('API URL is not configured.'));
     payload = payload || {};
     var controller = new AbortController();
-    var timeoutId = setTimeout(function() { controller.abort(); }, 15000);
+    var timeoutId = setTimeout(function() { controller.abort(); }, getPostTimeoutMs_(action));
     return fetch(API + '?action=' + encodeURIComponent(action), {
       method: 'POST',
       redirect: 'follow',
@@ -125,4 +140,3 @@
   window.getPeople = getPeople;
   window.invalidatePeopleCache = invalidatePeopleCache;
   window._peopleCache = _peopleCache;
-

@@ -164,6 +164,14 @@
   function refreshDuePeople() {
     if (_duePeoplePromise) return _duePeoplePromise;
     _duePeoplePromise = apiFetch('duePeople')
+      .catch(function(e) {
+        // Heavy sheets can occasionally exceed the first timeout window.
+        // Retry once before surfacing an error to the dashboard.
+        if (String(e || '').toLowerCase().indexOf('timed out') >= 0) {
+          return apiFetch('duePeople');
+        }
+        throw e;
+      })
       .then(function(due) {
         _dashDueSnapshot = due || {};
         applyHomeQuickStatsFromDue_(_dashDueSnapshot);

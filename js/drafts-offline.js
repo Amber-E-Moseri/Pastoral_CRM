@@ -3,8 +3,9 @@
   var LOG_DRAFT_KEY = 'ct-log-draft-v1';
   var BS_DRAFT_KEY = 'ct-bs-draft-v1';
   var REMINDERS_KEY = 'ct-local-reminders-v1';
+  var _aiConfirmInFlight = false;
 
-  function $(id){ return document.getElementById(id); }
+  function byId(id){ return document.getElementById(id); }
   function safeJsonParse(str, fallback){ try { return JSON.parse(str); } catch(e){ return fallback; } }
   function setLS(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
   function getLS(k, fallback){ try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; } catch(e){ return fallback; } }
@@ -107,11 +108,11 @@
     });
   }
   function updateDailySummaryUi(){
-    var stat = $('phone-notif-status');
+    var stat = byId('phone-notif-status');
     if (stat) stat.textContent = getDailySummaryStatusText();
-    var label = $('daily-summary-toggle-label');
+    var label = byId('daily-summary-toggle-label');
     if (label) { label.textContent = isDailySummaryEnabled() ? 'On' : 'Off'; label.className = 'sw-label ' + (isDailySummaryEnabled() ? 'on' : 'off'); }
-    var toggle = $('daily-summary-toggle');
+    var toggle = byId('daily-summary-toggle');
     if (toggle) toggle.checked = isDailySummaryEnabled();
   }
   function toggleDailySummary(on){
@@ -157,7 +158,7 @@
   function bootstrapReminderTimers(){ clearReminderTimers(); }
 
   function enhanceSettings(){
-    var old = $('settings-your-name');
+    var old = byId('settings-your-name');
     if (old) {
       var card = old.closest('div[style*="background:var(--surface)"]');
       if (card) card.remove();
@@ -166,7 +167,7 @@
 
   var _origLoadAppSettings = window.loadAppSettings;
   window.loadAppSettings = function(){
-    var el = $('app-settings-list');
+    var el = byId('app-settings-list');
     if (!el) return;
     el.innerHTML = '<div class="people-loading" style="padding:16px 0"><span>Loading</span><span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span></div>';
     apiFetch('getSettings').then(function(list){
@@ -247,9 +248,9 @@
     });
   };
   window.saveYourName = function(){
-    var inp = $('appsettings-your-name') || $('settings-your-name');
-    var btn = $('appsettings-your-name-btn') || $('your-name-btn');
-    var stat = $('appsettings-your-name-status') || $('your-name-status');
+    var inp = byId('appsettings-your-name') || byId('settings-your-name');
+    var btn = byId('appsettings-your-name-btn') || byId('your-name-btn');
+    var stat = byId('appsettings-your-name-status') || byId('your-name-status');
     if (!inp) return;
     var val = inp.value.trim();
     if (!val) { if (stat) { stat.textContent = 'âœ•'; stat.className='aset-status err'; } return; }
@@ -258,7 +259,7 @@
       if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
       if (res && res.success) {
         window._userName = val;
-        var greetEl = $('home-greeting');
+        var greetEl = byId('home-greeting');
         if (greetEl) { var gr = window.getGreeting_ ? window.getGreeting_() : 'Good morning'; greetEl.textContent = val ? gr + ', ' + val + '.' : gr + '.'; }
         if (stat) { stat.textContent = 'âœ“'; stat.className='aset-status ok'; }
       } else if (stat) { stat.textContent='âœ•'; stat.className='aset-status err'; }
@@ -267,7 +268,7 @@
 
   function saveAiDraft(){
     var draft = {
-      text: $('ai-input') ? $('ai-input').value : '',
+      text: byId('ai-input') ? byId('ai-input').value : '',
       parsed: window._aiParsed || null,
       updatedAt: new Date().toISOString()
     };
@@ -275,14 +276,14 @@
   }
   function clearAiDraft(){ delLS(AI_DRAFT_KEY); }
   function saveLogDraft(){
-    var pid = $('person-id') ? $('person-id').value : '';
+    var pid = byId('person-id') ? byId('person-id').value : '';
     var draft = {
       personId: pid,
-      personName: $('sel-name') ? $('sel-name').textContent : '',
+      personName: byId('sel-name') ? byId('sel-name').textContent : '',
       result: window.selResult || '',
       action: window.selAction || 'None',
-      date: $('next-dt') ? $('next-dt').value : '',
-      summary: $('summary') ? $('summary').value : ''
+      date: byId('next-dt') ? byId('next-dt').value : '',
+      summary: byId('summary') ? byId('summary').value : ''
     };
     setLS(LOG_DRAFT_KEY, draft);
   }
@@ -294,22 +295,22 @@
       personName: window.bsName,
       result: window.bsResult || '',
       action: window.bsAction || 'None',
-      date: $('bs-next-dt') ? $('bs-next-dt').value : '',
-      summary: $('bs-summary') ? $('bs-summary').value : ''
+      date: byId('bs-next-dt') ? byId('bs-next-dt').value : '',
+      summary: byId('bs-summary') ? byId('bs-summary').value : ''
     });
   }
   function clearBsDraft(){ delLS(BS_DRAFT_KEY); }
 
   function restoreLogDraft(){
     var draft = getLS(LOG_DRAFT_KEY, null);
-    if (!draft || !draft.personId || !$('person-id')) return;
-    $('person-id').value = draft.personId;
-    if ($('person-search')) $('person-search').style.display = 'none';
-    if ($('sel-pill')) $('sel-pill').classList.add('on');
-    if ($('sel-name')) $('sel-name').textContent = draft.personName || draft.personId;
-    if ($('sel-av')) $('sel-av').textContent = initials(draft.personName || draft.personId);
-    if (draft.summary && $('summary')) $('summary').value = draft.summary;
-    if (draft.date && $('next-dt')) $('next-dt').value = draft.date;
+    if (!draft || !draft.personId || !byId('person-id')) return;
+    byId('person-id').value = draft.personId;
+    if (byId('person-search')) byId('person-search').style.display = 'none';
+    if (byId('sel-pill')) byId('sel-pill').classList.add('on');
+    if (byId('sel-name')) byId('sel-name').textContent = draft.personName || draft.personId;
+    if (byId('sel-av')) byId('sel-av').textContent = initials(draft.personName || draft.personId);
+    if (draft.summary && byId('summary')) byId('summary').value = draft.summary;
+    if (draft.date && byId('next-dt')) byId('next-dt').value = draft.date;
     window.selResult = draft.result || '';
     window.selAction = draft.action || 'None';
     document.querySelectorAll('.chip').forEach(function(c){ c.className = 'chip'; });
@@ -320,23 +321,23 @@
     }
     var ab = document.querySelector('.ac[data-a="' + (draft.action || 'None').replace(/"/g,'\\"') + '"]');
     if (ab && window.pickAction) window.pickAction(ab);
-    if ((draft.action === 'Callback' || draft.action === 'Follow-up') && $('dateWrap')) $('dateWrap').classList.add('on');
-    if ($('msg-bar')) { $('msg-bar').textContent = 'Draft restored.'; $('msg-bar').className = 'msg info'; }
+    if ((draft.action === 'Callback' || draft.action === 'Follow-up') && byId('dateWrap')) byId('dateWrap').classList.add('on');
+    if (byId('msg-bar')) { byId('msg-bar').textContent = 'Draft restored.'; byId('msg-bar').className = 'msg info'; }
   }
 
   function restoreBsDraftIfMatch(pid){
     var draft = getLS(BS_DRAFT_KEY, null);
     if (!draft || draft.personId !== pid) return;
-    if (draft.summary && $('bs-summary')) $('bs-summary').value = draft.summary;
-    if (draft.date && $('bs-next-dt')) $('bs-next-dt').value = draft.date;
+    if (draft.summary && byId('bs-summary')) byId('bs-summary').value = draft.summary;
+    if (draft.date && byId('bs-next-dt')) byId('bs-next-dt').value = draft.date;
     if (draft.result) {
       var rbtn = document.querySelector('#bsheet .chip[data-r="' + draft.result.replace(/"/g,'\\"') + '"]');
       if (rbtn && window.bsPick) window.bsPick(rbtn,'r');
     }
     var abtn = document.querySelector('#bsheet .ac[data-a="' + (draft.action || 'None').replace(/"/g,'\\"') + '"]');
     if (abtn && window.bsPick) window.bsPick(abtn,'a');
-    if ((draft.action === 'Callback' || draft.action === 'Follow-up') && $('bs-dateWrap')) $('bs-dateWrap').style.display = 'block';
-    if ($('bs-msg')) { $('bs-msg').textContent = 'Draft restored.'; $('bs-msg').className = 'msg info'; }
+    if ((draft.action === 'Callback' || draft.action === 'Follow-up') && byId('bs-dateWrap')) byId('bs-dateWrap').style.display = 'block';
+    if (byId('bs-msg')) { byId('bs-msg').textContent = 'Draft restored.'; byId('bs-msg').className = 'msg info'; }
   }
 
   function matchPeople(desc, people){
@@ -406,8 +407,8 @@
   }
 
   function ensureAiEditors(){
-    var dateRow = $('ai-conf-date-row');
-    if (dateRow && !$('ai-date-edit')) {
+    var dateRow = byId('ai-conf-date-row');
+    if (dateRow && !byId('ai-date-edit')) {
       dateRow.classList.add('ai-editable-card');
       dateRow.insertAdjacentHTML('beforeend', '' +
         '<div id="ai-date-edit" class="ai-inline-edit">' +
@@ -421,24 +422,24 @@
           '</div>' +
           '' +
         '</div>');
-      dateRow.addEventListener('click', function(e){ if (e.target.closest('#ai-date-edit')) return; $('ai-date-edit').classList.toggle('open'); });
-      $('ai-date-input').addEventListener('input', function(){ if (!window._aiParsed) return; window._aiParsed.nextActionDateTime = this.value; if (!window._aiParsed.nextAction || window._aiParsed.nextAction === 'None') window._aiParsed.nextAction = 'Follow-up'; renderAiDate(); saveAiDraft(); });
+      dateRow.addEventListener('click', function(e){ if (e.target.closest('#ai-date-edit')) return; byId('ai-date-edit').classList.toggle('open'); });
+      byId('ai-date-input').addEventListener('input', function(){ if (!window._aiParsed) return; window._aiParsed.nextActionDateTime = this.value; if (!window._aiParsed.nextAction || window._aiParsed.nextAction === 'None') window._aiParsed.nextAction = 'Follow-up'; renderAiDate(); saveAiDraft(); });
     }
-    var personWrap = $('ai-person-override');
-    if (personWrap && !$('ai-conf-edit-person')) {
-      var personHeader = $('ai-conf-av') && $('ai-conf-av').parentNode && $('ai-conf-av').parentNode.parentNode;
+    var personWrap = byId('ai-person-override');
+    if (personWrap && !byId('ai-conf-edit-person')) {
+      var personHeader = byId('ai-conf-av') && byId('ai-conf-av').parentNode && byId('ai-conf-av').parentNode.parentNode;
       if (personHeader) {
         personHeader.classList.add('ai-editable-card');
         personHeader.id = 'ai-conf-edit-person';
         personHeader.insertAdjacentHTML('afterend', '<div id="ai-person-inline" class="ai-inline-edit"><div class="ai-mini-label">Change person</div><div style="position:relative;"><input id="ai-override-search" style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-soft);font-family:inherit;font-size:14px;color:var(--text);outline:none;" placeholder="Search by name..." oninput="aiOverrideSearch()" autocomplete="off"><div id="ai-override-drop" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--surface);border:1px solid var(--accent);border-radius:var(--radius-sm);box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:160px;overflow-y:auto;z-index:100;"></div></div><div class="ai-person-picked" id="ai-person-picked-note"></div></div>');
-        personHeader.addEventListener('click', function(e){ if (e.target.closest('#ai-person-inline')) return; $('ai-person-inline').classList.toggle('open'); var inp=$('ai-override-search'); if (inp) setTimeout(function(){ inp.focus(); }, 50); });
+        personHeader.addEventListener('click', function(e){ if (e.target.closest('#ai-person-inline')) return; byId('ai-person-inline').classList.toggle('open'); var inp=byId('ai-override-search'); if (inp) setTimeout(function(){ inp.focus(); }, 50); });
       }
       personWrap.style.display = 'none';
     }
   }
 
   function renderAiDate(){
-    var row = $('ai-conf-date-row'), out = $('ai-conf-date'), input = $('ai-date-input');
+    var row = byId('ai-conf-date-row'), out = byId('ai-conf-date'), input = byId('ai-date-input');
     if (!row || !out || !window._aiParsed) return;
     var a = window._aiParsed.nextAction || 'None';
     var hasAction = (a === 'Callback' || a === 'Follow-up');
@@ -458,8 +459,8 @@
   };
 
   window.aiOverrideSearch = function(){
-    var q = normalize(($('ai-override-search') && $('ai-override-search').value) || '');
-    var drop = $('ai-override-drop');
+    var q = normalize((byId('ai-override-search') && byId('ai-override-search').value) || '');
+    var drop = byId('ai-override-drop');
     if (!drop) return;
     var people = (window._peopleCache && Array.isArray(window._peopleCache.data) && window._peopleCache.data.length)
       ? window._peopleCache.data
@@ -483,24 +484,24 @@
     window._aiParsed.personId = p.id;
     window._aiParsed.personName = p.name || p.id;
     window._aiParsed.matchConfidence = 'manual';
-    if ($('ai-conf-name')) $('ai-conf-name').textContent = p.name || p.id;
-    if ($('ai-conf-av')) $('ai-conf-av').textContent = initials(p.name || p.id);
-    if ($('ai-conf-match')) $('ai-conf-match').textContent = 'Manual selection';
-    if ($('ai-person-picked-note')) $('ai-person-picked-note').textContent = 'Selected: ' + (p.name || p.id);
-    if ($('ai-override-drop')) $('ai-override-drop').style.display = 'none';
+    if (byId('ai-conf-name')) byId('ai-conf-name').textContent = p.name || p.id;
+    if (byId('ai-conf-av')) byId('ai-conf-av').textContent = initials(p.name || p.id);
+    if (byId('ai-conf-match')) byId('ai-conf-match').textContent = 'Manual selection';
+    if (byId('ai-person-picked-note')) byId('ai-person-picked-note').textContent = 'Selected: ' + (p.name || p.id);
+    if (byId('ai-override-drop')) byId('ai-override-drop').style.display = 'none';
     saveAiDraft();
   };
 
   function renderAiSuggestions(parsed){
-    var note = $('ai-person-picked-note'); if (note) note.textContent = '';
+    var note = byId('ai-person-picked-note'); if (note) note.textContent = '';
     if (!parsed) return;
-    if ($('ai-conf-name')) $('ai-conf-name').textContent = parsed.personName || 'Select a person';
-    if ($('ai-conf-av')) $('ai-conf-av').textContent = initials(parsed.personName || '?');
-    if ($('ai-conf-match')) {
-      $('ai-conf-match').textContent = parsed.matchConfidence === 'high' ? 'High confidence match' : parsed.matchConfidence === 'medium' ? 'Possible match - please confirm' : parsed.matchConfidence === 'manual' ? 'Manual selection' : 'No confident match';
+    if (byId('ai-conf-name')) byId('ai-conf-name').textContent = parsed.personName || 'Select a person';
+    if (byId('ai-conf-av')) byId('ai-conf-av').textContent = initials(parsed.personName || '?');
+    if (byId('ai-conf-match')) {
+      byId('ai-conf-match').textContent = parsed.matchConfidence === 'high' ? 'High confidence match' : parsed.matchConfidence === 'medium' ? 'Possible match - please confirm' : parsed.matchConfidence === 'manual' ? 'Manual selection' : 'No confident match';
     }
-    var inline = $('ai-person-inline');
-    var drop = $('ai-override-drop');
+    var inline = byId('ai-person-inline');
+    var drop = byId('ai-override-drop');
     if (inline) {
       inline.classList.toggle('open', parsed.matchConfidence !== 'high');
       if (drop && parsed.suggestions && parsed.suggestions.length) {
@@ -513,11 +514,11 @@
   }
 
   window.runAiParse = function(){
-    var desc = ($('ai-input') && $('ai-input').value.trim()) || '';
-    if (!desc) { var msg = $('ai-input-msg'); if (msg) { msg.textContent='Please describe the call first.'; msg.className='msg error'; } return; }
+    var desc = (byId('ai-input') && byId('ai-input').value.trim()) || '';
+    if (!desc) { var msg = byId('ai-input-msg'); if (msg) { msg.textContent='Please describe the call first.'; msg.className='msg error'; } return; }
     if (window.stopVoice) stopVoice();
-    var btn = $('ai-parse-btn'); if (btn) { btn.disabled = true; btn.textContent='Processing...'; }
-    if ($('ai-input-msg')) $('ai-input-msg').className='msg';
+    var btn = byId('ai-parse-btn'); if (btn) { btn.disabled = true; btn.textContent='Processing...'; }
+    if (byId('ai-input-msg')) byId('ai-input-msg').className='msg';
     var peoplePromise = (window.allPeople && window.allPeople.length)
       ? Promise.resolve(window.allPeople)
       : (window.getPeople ? window.getPeople() : apiFetch('people'));
@@ -540,8 +541,8 @@
         suggestions: match.suggestions || []
       };
       ensureAiEditors();
-      if ($('ai-conf-summary-row')) $('ai-conf-summary-row').style.display = 'block';
-      if ($('ai-conf-summary')) $('ai-conf-summary').value = window._aiParsed.summary || '';
+      if (byId('ai-conf-summary-row')) byId('ai-conf-summary-row').style.display = 'block';
+      if (byId('ai-conf-summary')) byId('ai-conf-summary').value = window._aiParsed.summary || '';
       document.querySelectorAll('#ai-result-chips .ai-rc').forEach(function(b){ b.className='ai-rc'; if (b.getAttribute('data-r') === result) aiPickResult(b); });
       document.querySelectorAll('#ai-action-chips .ai-rc').forEach(function(b){ b.className='ai-rc'; if (b.getAttribute('data-a') === nextAction) b.className='ai-rc sel-action'; });
       renderAiSuggestions(window._aiParsed);
@@ -549,7 +550,7 @@
       aiShowStep('confirm');
       saveAiDraft();
       if (btn) { btn.disabled=false; btn.textContent='Quick Parse'; }
-    }).catch(function(e){ if (btn) { btn.disabled=false; btn.textContent='Quick Parse'; } var msg = $('ai-input-msg'); if (msg) { msg.textContent='Could not parse right now. ' + String(e); msg.className='msg error'; } });
+    }).catch(function(e){ if (btn) { btn.disabled=false; btn.textContent='Quick Parse'; } var msg = byId('ai-input-msg'); if (msg) { msg.textContent='Could not parse right now. ' + String(e); msg.className='msg error'; } });
   };
 
   var _origAiPickResult = window.aiPickResult;
@@ -574,19 +575,20 @@
   };
 
   window.confirmAiLog = function(){
+    if (_aiConfirmInFlight) return;
     if (!window._aiParsed) return;
     var p = window._aiParsed;
     if (!p.personId) {
-      var msg = $('ai-confirm-msg'); if (msg) { msg.textContent='Please choose the person before saving.'; msg.className='msg error'; } return;
+      var msg = byId('ai-confirm-msg'); if (msg) { msg.textContent='Please choose the person before saving.'; msg.className='msg error'; } return;
     }
-    var summaryText = $('ai-conf-summary') ? $('ai-conf-summary').value.trim() : (p.summary || '');
+    var summaryText = byId('ai-conf-summary') ? byId('ai-conf-summary').value.trim() : (p.summary || '');
     var aiAssist = inferAssistFromText(summaryText);
     if ((!p.nextAction || p.nextAction === 'None') && aiAssist.nextAction !== 'None') p.nextAction = aiAssist.nextAction;
     if (!p.nextActionDateTime && aiAssist.nextActionDateTime && (p.nextAction === 'Callback' || p.nextAction === 'Follow-up')) {
       p.nextActionDateTime = aiAssist.nextActionDateTime;
     }
     if ((p.nextAction === 'Callback' || p.nextAction === 'Follow-up') && !p.nextActionDateTime) {
-      var msg2 = $('ai-confirm-msg'); if (msg2) { msg2.textContent='Please choose a follow-up date.'; msg2.className='msg error'; } return;
+      var msg2 = byId('ai-confirm-msg'); if (msg2) { msg2.textContent='Please choose a follow-up date.'; msg2.className='msg error'; } return;
     }
     var payload = {
       personId: p.personId,
@@ -596,9 +598,11 @@
       summary: summaryText,
       nextActionDateTime: p.nextActionDateTime || null
     };
-    var btn = $('ai-confirm-btn'); if (btn) { btn.disabled=true; btn.textContent='Savingâ€¦'; }
+    var btn = byId('ai-confirm-btn'); if (btn) { btn.disabled=true; btn.textContent='Saving...'; }
+    _aiConfirmInFlight = true;
     var savePromise = !navigator.onLine ? (queueOfflineCall(payload), Promise.resolve({ success:true, offline:true })) : apiPost('saveInteraction', { payload: payload });
     savePromise.then(function(res){
+      _aiConfirmInFlight = false;
       if (res && res.success) {
         if (window.runPostSaveRefresh) runPostSaveRefresh().catch(function(e){ console.warn('[Flock]', e); });
         var aiTodos = aiAssist.todos || [];
@@ -608,33 +612,45 @@
             personId: payload.personId,
             personName: payload.fullName,
             todos: aiTodos.map(function(t){ return { text: t }; })
-          } }).then(function(){ if (window.loadTodos && $('pg-todos') && $('pg-todos').classList.contains('active')) loadTodos(); }).catch(function(e){ console.warn('[Flock]', e); });
+          } }).then(function(){ if (window.loadTodos && byId('pg-todos') && byId('pg-todos').classList.contains('active')) loadTodos(); }).catch(function(e){ console.warn('[Flock]', e); });
         }
         scheduleLocalReminder(payload);
         clearAiDraft();
-        if ($('ai-success-sub')) $('ai-success-sub').textContent = (res.offline ? 'ðŸ“¶ Saved offline - ' : 'Call with ') + payload.fullName + (res.offline ? ' will sync when reconnected.' : ' has been logged.') + (aiTodos.length ? ' ' + aiTodos.length + ' action item' + (aiTodos.length > 1 ? 's' : '') + ' added.' : '');
+        if (byId('ai-success-sub')) byId('ai-success-sub').textContent = (res.offline ? 'Saved offline - ' : 'Call with ') + payload.fullName + (res.offline ? ' will sync when reconnected.' : ' has been logged.') + (aiTodos.length ? ' ' + aiTodos.length + ' action item' + (aiTodos.length > 1 ? 's' : '') + ' added.' : '');
         aiShowStep('success');
       } else {
-        if (btn) { btn.disabled=false; btn.textContent='âœ“ Log This Call'; }
-        var msg = $('ai-confirm-msg'); if (msg) { msg.textContent='Save failed. Check that the selected person exists and your Apps Script endpoint is responding.'; msg.className='msg error'; }
+        if (btn) { btn.disabled=false; btn.textContent='Log this call'; }
+        var msg = byId('ai-confirm-msg'); if (msg) { msg.textContent='Save failed. Check that the selected person exists and your Apps Script endpoint is responding.'; msg.className='msg error'; }
       }
-    }).catch(function(e){ if (btn) { btn.disabled=false; btn.textContent='âœ“ Log This Call'; } var msg = $('ai-confirm-msg'); if (msg) { msg.textContent='Error: ' + String(e); msg.className='msg error'; } });
+    }).catch(function(e){
+      _aiConfirmInFlight = false;
+      if (btn) { btn.disabled=false; btn.textContent='Log this call'; }
+      var msg = byId('ai-confirm-msg');
+      if (msg) {
+        var errText = (e && e.message) ? e.message : String(e);
+        msg.textContent='Error: ' + errText;
+        msg.className='msg error';
+      }
+    });
   };
 
   var _origOpenAiAssist = window.openAiAssist;
   window.openAiAssist = function(){
     if (_origOpenAiAssist) _origOpenAiAssist();
+    _aiConfirmInFlight = false;
+    var confirmBtn = byId('ai-confirm-btn');
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Log this call'; }
     ensureAiEditors();
     var draft = getLS(AI_DRAFT_KEY, null);
-    if (draft && $('ai-input')) {
-      $('ai-input').value = draft.text || '';
+    if (draft && byId('ai-input')) {
+      byId('ai-input').value = draft.text || '';
       if (draft.parsed) {
         window._aiParsed = draft.parsed;
-        if ($('ai-conf-summary')) $('ai-conf-summary').value = draft.parsed.summary || '';
+        if (byId('ai-conf-summary')) byId('ai-conf-summary').value = draft.parsed.summary || '';
       }
-      if ($('ai-input-msg') && (draft.text || (draft.parsed && draft.parsed.personId))) {
-        $('ai-input-msg').textContent = 'Draft restored.';
-        $('ai-input-msg').className = 'msg info';
+      if (byId('ai-input-msg') && (draft.text || (draft.parsed && draft.parsed.personId))) {
+        byId('ai-input-msg').textContent = 'Draft restored.';
+        byId('ai-input-msg').className = 'msg info';
       }
     }
   };
@@ -642,7 +658,7 @@
   var _origCloseAiAssist = window.closeAiAssist;
   window.closeAiAssist = function(){
     // If AI log was successfully saved, do not recreate a draft on close.
-    var savedView = $('ai-step-success') && $('ai-step-success').style.display !== 'none';
+    var savedView = byId('ai-step-success') && byId('ai-step-success').style.display !== 'none';
     if (savedView) clearAiDraft();
     else saveAiDraft();
     if (_origCloseAiAssist) _origCloseAiAssist();
@@ -656,12 +672,12 @@
   window.openBsheet = function(pid, name){ if (_origOpenBsheet) _origOpenBsheet(pid, name); restoreBsDraftIfMatch(pid); };
   var _origSaveBsheet = window.saveBsheet;
   window.saveBsheet = function(){
-    var payload = { personId: window.bsPid, fullName: window.bsName, result: window.bsResult, nextAction: window.bsAction || 'None', summary: $('bs-summary') ? $('bs-summary').value.trim() : '', nextActionDateTime: $('bs-next-dt') ? $('bs-next-dt').value : '' };
+    var payload = { personId: window.bsPid, fullName: window.bsName, result: window.bsResult, nextAction: window.bsAction || 'None', summary: byId('bs-summary') ? byId('bs-summary').value.trim() : '', nextActionDateTime: byId('bs-next-dt') ? byId('bs-next-dt').value : '' };
     var before = JSON.stringify(payload);
-    var origMsg = $('bs-msg') ? $('bs-msg').textContent : '';
+    var origMsg = byId('bs-msg') ? byId('bs-msg').textContent : '';
     var p = _origSaveBsheet ? _origSaveBsheet() : null;
     setTimeout(function(){
-      var msg = $('bs-msg') ? $('bs-msg').textContent : '';
+      var msg = byId('bs-msg') ? byId('bs-msg').textContent : '';
       if (/saved/i.test(msg)) { clearBsDraft(); scheduleLocalReminder(payload); }
       else if (before) saveBsDraft();
     }, 100);
@@ -669,10 +685,10 @@
   };
   var _origSaveCall = window.saveCall;
   window.saveCall = function(){
-    var payload = { personId: $('person-id') ? $('person-id').value : '', fullName: $('sel-name') ? $('sel-name').textContent : '', result: window.selResult || '', nextAction: window.selAction || 'None', summary: $('summary') ? $('summary').value.trim() : '', nextActionDateTime: $('next-dt') ? $('next-dt').value : '' };
+    var payload = { personId: byId('person-id') ? byId('person-id').value : '', fullName: byId('sel-name') ? byId('sel-name').textContent : '', result: window.selResult || '', nextAction: window.selAction || 'None', summary: byId('summary') ? byId('summary').value.trim() : '', nextActionDateTime: byId('next-dt') ? byId('next-dt').value : '' };
     var ret = _origSaveCall ? _origSaveCall() : null;
     setTimeout(function(){
-      if ($('success-screen') && $('success-screen').classList.contains('on')) { clearLogDraft(); scheduleLocalReminder(payload); }
+      if (byId('success-screen') && byId('success-screen').classList.contains('on')) { clearLogDraft(); scheduleLocalReminder(payload); }
       else saveLogDraft();
     }, 120);
     return ret;
@@ -749,10 +765,11 @@
     enhanceSettings();
     ensureAiEditors();
     bootstrapReminderTimers();
-    if ($('ai-input')) $('ai-input').addEventListener('input', saveAiDraft);
+    if (byId('ai-input')) byId('ai-input').addEventListener('input', saveAiDraft);
     if (localStorage.getItem('ct-dark') === null) { document.body.classList.remove('dark'); }
     updateDailySummaryUi();
     notifyDueSummaryOnce();
   });
 })();
+
 

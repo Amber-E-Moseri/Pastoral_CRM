@@ -156,7 +156,8 @@ var bsPid = null, bsName = null, bsResult = '', bsAction = 'None', bsSaving = fa
     }).catch(function(e) {
       bsSaving = false;
       document.getElementById('bsheet-save-btn').disabled = false;
-      bsShowMsg('Error: ' + String(e), 'error');
+      var errText = (e && e.message) ? e.message : String(e);
+      bsShowMsg('Error: ' + errText, 'error');
     });
   }
 

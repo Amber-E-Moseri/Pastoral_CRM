@@ -1,6 +1,6 @@
-
+﻿
 (function(){
-  function $(id){ return document.getElementById(id); }
+  function byId(id){ return document.getElementById(id); }
   window.__returnPageForLog = 'pg-home';
 
   function currentActivePage(){
@@ -33,9 +33,9 @@
 
   // Add back button / label on success screen
   function updateLogSuccessActions(){
-    var screen = $('success-screen');
+    var screen = byId('success-screen');
     if (!screen) return;
-    var backBtn = $('log-return-btn');
+    var backBtn = byId('log-return-btn');
     if (!backBtn) {
       backBtn = document.createElement('button');
       backBtn.id = 'log-return-btn';
@@ -74,7 +74,7 @@
   var _oldSaveCallNav = window.saveCall;
   window.saveCall = function(){
     var ret = _oldSaveCallNav ? _oldSaveCallNav() : undefined;
-    setTimeout(function(){ if ($('success-screen') && $('success-screen').classList.contains('on')) attachPostSaveBehaviors(); }, 160);
+    setTimeout(function(){ if (byId('success-screen') && byId('success-screen').classList.contains('on')) attachPostSaveBehaviors(); }, 160);
     return ret;
   };
 
@@ -82,8 +82,8 @@
   window.confirmAiLog = function(){
     var ret = _oldConfirmAiLogNav ? _oldConfirmAiLogNav() : undefined;
     setTimeout(function(){
-      if ($('ai-step-success') && $('ai-step-success').style.display !== 'none') {
-        var doneBtn = $('ai-step-success').querySelector('button');
+      if (byId('ai-step-success') && byId('ai-step-success').style.display !== 'none') {
+        var doneBtn = byId('ai-step-success').querySelector('button');
         if (doneBtn) doneBtn.onclick = function(){ if (window.closeAiAssist) closeAiAssist(); backToReturnPage(); };
       }
     }, 180);
@@ -95,3 +95,4 @@
     updateLogSuccessActions();
   });
 })();
+

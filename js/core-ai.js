@@ -76,7 +76,7 @@
     }
     stopVoice();
     var btn = document.getElementById('ai-parse-btn');
-    btn.disabled = true; btn.textContent = '⏳ Processing...';
+    btn.disabled = true; btn.textContent = 'Processing...';
     document.getElementById('ai-input-msg').className = 'msg';
 
     // â”€â”€ Client-side parsing with chrono-node (no API key needed) â”€â”€
@@ -220,7 +220,7 @@
 
     document.getElementById('ai-confirm-msg').className = 'msg';
     document.getElementById('ai-confirm-btn').disabled = false;
-    document.getElementById('ai-confirm-btn').textContent = 'Log This Call';
+    document.getElementById('ai-confirm-btn').textContent = 'Log this call';
     aiShowStep('confirm');
   }
 
@@ -321,14 +321,15 @@
           (res.offline ? ' will sync when reconnected.' : ' has been logged.') + todoNote;
         aiShowStep('success');
       } else {
-        btn.disabled = false; btn.textContent = 'Log This Call';
+        btn.disabled = false; btn.textContent = 'Log this call';
         var msg = document.getElementById('ai-confirm-msg');
         msg.textContent = 'Save failed: ' + (res && res.error ? res.error : 'Unknown'); msg.className = 'msg error';
       }
     }).catch(function(e) {
-      btn.disabled = false; btn.textContent = 'Log This Call';
+      btn.disabled = false; btn.textContent = 'Log this call';
       var msg = document.getElementById('ai-confirm-msg');
-      msg.textContent = 'Error: ' + String(e); msg.className = 'msg error';
+      var errText = (e && e.message) ? e.message : String(e);
+      msg.textContent = 'Error: ' + errText; msg.className = 'msg error';
     });
   }
 
